@@ -1,0 +1,16 @@
+{
+  "id": "ade564f7c47e4c80ba83ae5b1d9bd3c2",
+  "place_name": "江边公园",
+  "images": [
+    {
+      "file_name": "place.jpg",
+      "label": "地点封面"
+    }
+  ],
+  "created_at": "2026-04-24T16:21:22.743366+08:00",
+  "updated_at": "2026-04-24T16:21:22.743366+08:00",
+  "summary_file": "summary.md",
+  "visit_ids": [
+    "7af0a14296854d5b997a52696b724508"
+  ]
+}

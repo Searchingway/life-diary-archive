@@ -1,0 +1,21 @@
+{
+  "id": "bd84c53e2f104ec385fe04d38b9195a0",
+  "title": "人类简史",
+  "author": "",
+  "status": "想读",
+  "start_date": "",
+  "finish_date": "",
+  "tags": [],
+  "images": [],
+  "related_diaries": [
+    {
+      "entry_id": "7fada8d572354d3ca8a8ac1b6c28266d",
+      "date": "2026-04-24",
+      "title": "读书夜"
+    }
+  ],
+  "created_at": "2026-04-24T16:38:23.839933+08:00",
+  "updated_at": "2026-04-24T16:38:23.839933+08:00",
+  "summary_file": "summary.md",
+  "notes_file": "notes.md"
+}

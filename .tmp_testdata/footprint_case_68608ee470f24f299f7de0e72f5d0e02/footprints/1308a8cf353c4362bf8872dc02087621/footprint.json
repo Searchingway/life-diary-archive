@@ -1,0 +1,15 @@
+{
+  "id": "1308a8cf353c4362bf8872dc02087621",
+  "date": "2026-04-24",
+  "place_name": "江边公园",
+  "images": [
+    {
+      "file_name": "lake.jpg",
+      "label": "日落照片"
+    }
+  ],
+  "related_entry_id": "",
+  "created_at": "2026-04-24T16:07:23.397475+08:00",
+  "updated_at": "2026-04-24T16:07:23.398477+08:00",
+  "thought_file": "thought.md"
+}

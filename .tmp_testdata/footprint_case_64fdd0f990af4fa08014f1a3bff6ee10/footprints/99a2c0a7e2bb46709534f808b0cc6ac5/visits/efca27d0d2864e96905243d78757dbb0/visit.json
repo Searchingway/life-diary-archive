@@ -1,0 +1,18 @@
+{
+  "id": "efca27d0d2864e96905243d78757dbb0",
+  "date": "2026-04-24",
+  "images": [
+    {
+      "file_name": "visit1.jpg",
+      "label": "白天"
+    },
+    {
+      "file_name": "visit2.png",
+      "label": ""
+    }
+  ],
+  "related_entry_id": "",
+  "created_at": "2026-04-24T16:22:34.718372+08:00",
+  "updated_at": "2026-04-24T16:22:34.719965+08:00",
+  "thought_file": "thought.md"
+}

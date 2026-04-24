@@ -1,0 +1,19 @@
+{
+  "id": "11fb1f3fc34b4071b3483eed8d9f8954",
+  "date": "2026-04-24",
+  "place_name": "",
+  "images": [
+    {
+      "file_name": "road.jpg",
+      "label": "路口"
+    },
+    {
+      "file_name": "tree.png",
+      "label": ""
+    }
+  ],
+  "related_entry_id": "",
+  "created_at": "2026-04-24T15:58:01.262127+08:00",
+  "updated_at": "2026-04-24T15:58:01.262127+08:00",
+  "thought_file": "thought.md"
+}

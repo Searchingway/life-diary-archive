@@ -1,0 +1,14 @@
+{
+  "id": "4257b40cca8f40f3949c5a5708eab89e",
+  "date": "2026-04-24",
+  "title": "",
+  "images": [
+    {
+      "file_name": "cover.jpg",
+      "label": "封面"
+    }
+  ],
+  "created_at": "2026-04-24T15:26:15+08:00",
+  "updated_at": "2026-04-24T15:26:15+08:00",
+  "body_file": "content.md"
+}

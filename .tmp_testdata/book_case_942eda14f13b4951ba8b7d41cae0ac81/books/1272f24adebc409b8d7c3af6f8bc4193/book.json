@@ -1,0 +1,24 @@
+{
+  "id": "1272f24adebc409b8d7c3af6f8bc4193",
+  "title": "置身事内",
+  "author": "兰小欢",
+  "status": "在读",
+  "start_date": "2026-04-01",
+  "finish_date": "",
+  "tags": [
+    "经济",
+    "中国"
+  ],
+  "images": [],
+  "related_diaries": [
+    {
+      "entry_id": "entry-1",
+      "date": "2026-04-24",
+      "title": "读书夜"
+    }
+  ],
+  "created_at": "2026-04-24T16:40:16.568482+08:00",
+  "updated_at": "2026-04-24T16:40:16.568482+08:00",
+  "summary_file": "summary.md",
+  "notes_file": "notes.md"
+}
