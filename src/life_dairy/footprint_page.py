@@ -22,9 +22,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .exchange import ExchangePackageExporter
 from .footprint_storage import FootprintStorage
 from .models import FootprintImageDraft, FootprintPlace, FootprintVisit
 from .storage import DiaryStorage
+from .ui_helpers import make_scroll_area
 
 
 class FootprintPage(QWidget):
@@ -89,7 +91,7 @@ class FootprintPage(QWidget):
         splitter.addWidget(self._build_editor())
         splitter.setSizes([300, 900])
 
-        layout.addWidget(splitter)
+        layout.addWidget(make_scroll_area(splitter))
 
     def _build_sidebar(self) -> QWidget:
         widget = QWidget(self)
@@ -110,6 +112,9 @@ class FootprintPage(QWidget):
         self.delete_place_button = QPushButton("删除当前地点足迹", widget)
         self.delete_place_button.clicked.connect(self.delete_current_place)
 
+        self.export_package_button = QPushButton("导出足迹压缩包", widget)
+        self.export_package_button.clicked.connect(self.export_footprint_package)
+
         self.place_list = QListWidget(widget)
         self.place_list.currentItemChanged.connect(self._on_current_place_item_changed)
 
@@ -117,6 +122,7 @@ class FootprintPage(QWidget):
         layout.addWidget(self.search_input)
         layout.addWidget(self.new_place_button)
         layout.addWidget(self.delete_place_button)
+        layout.addWidget(self.export_package_button)
         layout.addWidget(self.place_list, 1)
         return widget
 
@@ -151,7 +157,7 @@ class FootprintPage(QWidget):
         summary_label = QLabel("地点粗略描述", place_group)
         self.place_summary_edit = QTextEdit(place_group)
         self.place_summary_edit.setPlaceholderText("这里写地点本身的描述，例如环境、印象、适合做什么、为什么值得记住。")
-        self.place_summary_edit.setMaximumHeight(130)
+        self.place_summary_edit.setMinimumHeight(130)
         self.place_summary_edit.textChanged.connect(self._on_place_summary_changed)
 
         place_note = QLabel("先把地点本身建成一个档案，下面再给这个地点添加多个日期关联。", place_group)
@@ -164,6 +170,7 @@ class FootprintPage(QWidget):
         place_layout.addWidget(self._build_place_image_group())
 
         visit_group = QGroupBox("日期关联记录", widget)
+        visit_group.setMinimumHeight(520)
         visit_layout = QVBoxLayout(visit_group)
 
         visit_action_row = QHBoxLayout()
@@ -220,6 +227,7 @@ class FootprintPage(QWidget):
         thought_label = QLabel("这一天的感悟", visit_editor_panel)
         self.visit_thought_edit = QTextEdit(visit_editor_panel)
         self.visit_thought_edit.setPlaceholderText("这里写这次到这个地方时，当天的感受、发生的事情、当时的心情。")
+        self.visit_thought_edit.setMinimumHeight(180)
         self.visit_thought_edit.textChanged.connect(self._on_visit_thought_changed)
 
         visit_editor_layout.addWidget(self.visit_note_label)
@@ -450,6 +458,24 @@ class FootprintPage(QWidget):
             self.new_place()
 
         self._show_status("已删除当前地点足迹。", 3000)
+
+    def export_footprint_package(self) -> None:
+        export_dir = QFileDialog.getExistingDirectory(
+            self,
+            "选择足迹压缩包导出目录",
+            str((self.storage.root_dir / "exports").resolve()),
+        )
+        if not export_dir:
+            return
+
+        try:
+            zip_path = ExchangePackageExporter(self.storage.root_dir).export_module("footprint", export_dir)
+        except Exception as exc:
+            QMessageBox.critical(self, "导出失败", f"导出足迹压缩包时出错：\n{exc}")
+            return
+
+        QMessageBox.information(self, "导出完成", f"足迹压缩包已生成：\n\n{zip_path}")
+        self._show_status("已导出足迹压缩包。", 5000)
 
     def new_visit(self) -> None:
         if self.current_place is None:

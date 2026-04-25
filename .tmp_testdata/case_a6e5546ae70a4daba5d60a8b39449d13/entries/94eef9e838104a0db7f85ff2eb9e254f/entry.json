@@ -1,0 +1,18 @@
+{
+  "id": "94eef9e838104a0db7f85ff2eb9e254f",
+  "date": "2026-04-25",
+  "title": "",
+  "images": [
+    {
+      "file_name": "cover.jpg",
+      "label": "封面"
+    },
+    {
+      "file_name": "street.png",
+      "label": ""
+    }
+  ],
+  "created_at": "2026-04-25T09:49:49.131483+08:00",
+  "updated_at": "2026-04-25T09:49:49.131483+08:00",
+  "body_file": "content.md"
+}

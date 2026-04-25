@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QSignalBlocker, Qt, QUrl, Signal
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -27,9 +29,11 @@ from PySide6.QtWidgets import (
 )
 
 from .exporters import DiaryExportItem, DiaryExporter
+from .exchange import ExchangePackageExporter
 from .footprint_storage import FootprintStorage
 from .models import DiaryEntry, DiaryImageDraft
 from .storage import DiaryStorage
+from .ui_helpers import make_scroll_area
 
 
 class ExportRangeDialog(QDialog):
@@ -98,6 +102,7 @@ class DiaryPage(QWidget):
         self.footprint_storage = footprint_storage
         self.current_entry: DiaryEntry | None = None
         self.image_items: list[DiaryImageDraft] = []
+        self.heatmap_cells: list[QLabel] = []
         self.is_dirty = False
         self._is_loading_form = False
         self._is_loading_image_details = False
@@ -151,7 +156,7 @@ class DiaryPage(QWidget):
         splitter.addWidget(self._build_editor())
         splitter.setSizes([280, 760])
 
-        layout.addWidget(splitter)
+        layout.addWidget(make_scroll_area(splitter))
 
     def _build_sidebar(self) -> QWidget:
         widget = QWidget(self)
@@ -172,6 +177,9 @@ class DiaryPage(QWidget):
         self.delete_button = QPushButton("删除当前日记", widget)
         self.delete_button.clicked.connect(self.delete_current_entry)
 
+        self.export_package_button = QPushButton("导出日记压缩包", widget)
+        self.export_package_button.clicked.connect(self.export_diary_package)
+
         self.entry_list = QListWidget(widget)
         self.entry_list.currentItemChanged.connect(self._on_current_item_changed)
 
@@ -179,6 +187,7 @@ class DiaryPage(QWidget):
         layout.addWidget(self.search_input)
         layout.addWidget(self.new_button)
         layout.addWidget(self.delete_button)
+        layout.addWidget(self.export_package_button)
         layout.addWidget(self.entry_list, 1)
         return widget
 
@@ -233,9 +242,11 @@ class DiaryPage(QWidget):
         body_label = QLabel("正文", widget)
         self.body_edit = QTextEdit(widget)
         self.body_edit.setPlaceholderText("先把第一篇日记写起来。")
+        self.body_edit.setMinimumHeight(260)
         self.body_edit.textChanged.connect(self._mark_dirty)
 
         image_group = QGroupBox("已插入图片", widget)
+        image_group.setMinimumHeight(260)
         image_group_layout = QHBoxLayout(image_group)
 
         image_left = QVBoxLayout()
@@ -273,10 +284,34 @@ class DiaryPage(QWidget):
         layout.addLayout(action_row)
         layout.addLayout(form)
         layout.addLayout(relation_row)
+        layout.addWidget(self._build_stats_group())
         layout.addWidget(body_label)
         layout.addWidget(self.body_edit, 1)
         layout.addWidget(image_group)
         return widget
+
+    def _build_stats_group(self) -> QWidget:
+        group = QGroupBox("日记统计", self)
+        layout = QVBoxLayout(group)
+        self.stats_summary_label = QLabel("最近 18 周日记热力图", group)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(4)
+        grid.setVerticalSpacing(4)
+        self.heatmap_cells = []
+        for column in range(18):
+            for row in range(7):
+                cell = QLabel(group)
+                cell.setFixedSize(13, 13)
+                cell.setToolTip("暂无记录")
+                cell.setStyleSheet("background: #ebedf0; border-radius: 3px;")
+                grid.addWidget(cell, row, column)
+                self.heatmap_cells.append(cell)
+
+        layout.addWidget(self.stats_summary_label)
+        layout.addLayout(grid)
+        self._refresh_stats_heatmap()
+        return group
 
     def refresh_list(self, *_args, select_id: str | None = None) -> None:
         current_id = select_id
@@ -299,6 +334,7 @@ class DiaryPage(QWidget):
         if target_row >= 0:
             self.entry_list.setCurrentRow(target_row)
         del blocker
+        self._refresh_stats_heatmap()
 
     def new_entry(self) -> None:
         if not self._maybe_keep_changes():
@@ -425,6 +461,7 @@ class DiaryPage(QWidget):
             self.new_entry()
 
         self._show_status("已删除当前日记。", 3000)
+        self._refresh_stats_heatmap()
 
     def export_current_entry(self) -> None:
         if self.current_entry is None:
@@ -510,6 +547,24 @@ class DiaryPage(QWidget):
             f"PDF：{pdf_path}",
         )
         self._show_status("已导出 Word 和 PDF。", 5000)
+
+    def export_diary_package(self) -> None:
+        export_dir = QFileDialog.getExistingDirectory(
+            self,
+            "选择日记压缩包导出目录",
+            str((self.storage.root_dir / "exports").resolve()),
+        )
+        if not export_dir:
+            return
+
+        try:
+            zip_path = ExchangePackageExporter(self.storage.root_dir).export_module("diary", export_dir)
+        except Exception as exc:
+            QMessageBox.critical(self, "导出失败", f"导出日记压缩包时出错：\n{exc}")
+            return
+
+        QMessageBox.information(self, "导出完成", f"日记压缩包已生成：\n\n{zip_path}")
+        self._show_status("已导出日记压缩包。", 5000)
 
     def reload_current_entry(self) -> None:
         if self.current_entry is None:
@@ -650,6 +705,34 @@ class DiaryPage(QWidget):
         count = len(self.footprint_storage.list_place_visits_by_date(target_date))
         self.footprint_hint_label.setText(f"当天足迹关联：{count} 条")
         self.show_footprints_button.setEnabled(count > 0)
+
+    def _refresh_stats_heatmap(self) -> None:
+        if not self.heatmap_cells:
+            return
+
+        today = date.today()
+        start = today - timedelta(days=(18 * 7) - 1)
+        counts: dict[date, int] = {}
+        total = 0
+        for entry in self.storage.list_entries():
+            try:
+                day = datetime.strptime(entry.date, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if start <= day <= today:
+                counts[day] = counts.get(day, 0) + 1
+                total += 1
+
+        colors = ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"]
+        for index, cell in enumerate(self.heatmap_cells):
+            day = start + timedelta(days=index)
+            count = counts.get(day, 0)
+            color_index = min(count, len(colors) - 1)
+            cell.setStyleSheet(f"background: {colors[color_index]}; border-radius: 3px;")
+            cell.setToolTip(f"{day.isoformat()}：{count} 篇日记")
+
+        active_days = len(counts)
+        self.stats_summary_label.setText(f"最近 18 周共 {total} 篇日记，覆盖 {active_days} 天")
 
     def _emit_show_footprints_requested(self) -> None:
         self.show_footprints_requested.emit(self.date_edit.date().toString("yyyy-MM-dd"))

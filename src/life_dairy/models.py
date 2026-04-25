@@ -301,3 +301,44 @@ class BookEntry:
             images=[BookImage.from_value(item) for item in data.get("images", [])],
             related_diaries=[BookRelatedDiary.from_value(item) for item in data.get("related_diaries", [])],
         )
+
+
+@dataclass(slots=True)
+class PlanItem:
+    id: str
+    title: str
+    due_date: str
+    status: str
+    priority: str
+    notes: str
+    created_at: str
+    updated_at: str
+
+    @property
+    def display_title(self) -> str:
+        return self.title.strip() or "未命名计划"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "due_date": self.due_date,
+            "status": self.status,
+            "priority": self.priority,
+            "notes": self.notes,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PlanItem":
+        return cls(
+            id=str(data["id"]),
+            title=str(data.get("title", "")),
+            due_date=str(data.get("due_date", "")),
+            status=str(data.get("status", "未开始")),
+            priority=str(data.get("priority", "普通")),
+            notes=str(data.get("notes", "")),
+            created_at=str(data.get("created_at", now_iso())),
+            updated_at=str(data.get("updated_at", now_iso())),
+        )

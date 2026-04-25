@@ -25,8 +25,10 @@ from PySide6.QtWidgets import (
 )
 
 from .book_storage import BookStorage
+from .exchange import ExchangePackageExporter
 from .models import BookEntry, BookImageDraft, BookRelatedDiary
 from .storage import DiaryStorage
+from .ui_helpers import make_scroll_area
 
 
 class DiaryPickerDialog(QDialog):
@@ -138,7 +140,7 @@ class BookPage(QWidget):
         splitter.addWidget(self._build_editor())
         splitter.setSizes([300, 900])
 
-        layout.addWidget(splitter)
+        layout.addWidget(make_scroll_area(splitter))
 
     def _build_sidebar(self) -> QWidget:
         widget = QWidget(self)
@@ -159,6 +161,9 @@ class BookPage(QWidget):
         self.delete_button = QPushButton("删除当前读书笔记", widget)
         self.delete_button.clicked.connect(self.delete_current_book)
 
+        self.export_package_button = QPushButton("导出读书压缩包", widget)
+        self.export_package_button.clicked.connect(self.export_book_package)
+
         self.book_list = QListWidget(widget)
         self.book_list.currentItemChanged.connect(self._on_current_item_changed)
 
@@ -166,6 +171,7 @@ class BookPage(QWidget):
         layout.addWidget(self.search_input)
         layout.addWidget(self.new_button)
         layout.addWidget(self.delete_button)
+        layout.addWidget(self.export_package_button)
         layout.addWidget(self.book_list, 1)
         return widget
 
@@ -224,12 +230,13 @@ class BookPage(QWidget):
         summary_label = QLabel("阅读摘要", info_group)
         self.summary_edit = QTextEdit(info_group)
         self.summary_edit.setPlaceholderText("简要记录这本书讲了什么，以及它为什么值得记。")
-        self.summary_edit.setMaximumHeight(110)
+        self.summary_edit.setMinimumHeight(120)
         self.summary_edit.textChanged.connect(self._mark_dirty)
 
         notes_label = QLabel("读书笔记正文", info_group)
         self.notes_edit = QTextEdit(info_group)
         self.notes_edit.setPlaceholderText("这里写你自己的读书感受、摘记和理解，重点是“书和你的关系”。")
+        self.notes_edit.setMinimumHeight(260)
         self.notes_edit.textChanged.connect(self._mark_dirty)
 
         info_layout.addLayout(form)
@@ -239,6 +246,7 @@ class BookPage(QWidget):
         info_layout.addWidget(self.notes_edit, 1)
 
         lower_splitter = QSplitter(Qt.Orientation.Horizontal, widget)
+        lower_splitter.setMinimumHeight(300)
         lower_splitter.addWidget(self._build_image_group())
         lower_splitter.addWidget(self._build_related_group())
         lower_splitter.setChildrenCollapsible(False)
@@ -443,6 +451,24 @@ class BookPage(QWidget):
             self.new_book()
 
         self._show_status("已删除当前读书笔记。", 3000)
+
+    def export_book_package(self) -> None:
+        export_dir = QFileDialog.getExistingDirectory(
+            self,
+            "选择读书压缩包导出目录",
+            str((self.storage.root_dir / "exports").resolve()),
+        )
+        if not export_dir:
+            return
+
+        try:
+            zip_path = ExchangePackageExporter(self.storage.root_dir).export_module("book", export_dir)
+        except Exception as exc:
+            QMessageBox.critical(self, "导出失败", f"导出读书压缩包时出错：\n{exc}")
+            return
+
+        QMessageBox.information(self, "导出完成", f"读书压缩包已生成：\n\n{zip_path}")
+        self._show_status("已导出读书压缩包。", 5000)
 
     def add_related_diary(self) -> None:
         dialog = DiaryPickerDialog(self.diary_storage, self)

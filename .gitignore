@@ -25,3 +25,6 @@ build/
 data/
 exports/
 *.log
+
+# 未完成功能
+diary_android/

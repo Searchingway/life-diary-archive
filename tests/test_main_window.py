@@ -19,6 +19,7 @@ from life_dairy.footprint_storage import FootprintStorage
 from life_dairy.main_window import DiaryMainWindow
 from life_dairy.book_storage import BookStorage
 from life_dairy.models import BookRelatedDiary
+from life_dairy.plan_storage import PlanStorage
 from life_dairy.storage import DiaryStorage
 
 
@@ -33,17 +34,24 @@ class DiaryMainWindowTests(unittest.TestCase):
         self.diary_storage = DiaryStorage(self.case_dir)
         self.footprint_storage = FootprintStorage(self.case_dir)
         self.book_storage = BookStorage(self.case_dir)
-        self.window = DiaryMainWindow(self.diary_storage, self.footprint_storage, self.book_storage)
+        self.plan_storage = PlanStorage(self.case_dir)
+        self.window = DiaryMainWindow(
+            self.diary_storage,
+            self.footprint_storage,
+            self.book_storage,
+            self.plan_storage,
+        )
 
     def tearDown(self) -> None:
         self.window.close()
         shutil.rmtree(self.case_dir, ignore_errors=True)
 
     def test_main_window_has_diary_and_footprint_tabs(self) -> None:
-        self.assertEqual(3, self.window.tabs.count())
+        self.assertEqual(4, self.window.tabs.count())
         self.assertEqual("日记", self.window.tabs.tabText(0))
         self.assertEqual("足迹", self.window.tabs.tabText(1))
         self.assertEqual("读书", self.window.tabs.tabText(2))
+        self.assertEqual("轻计划", self.window.tabs.tabText(3))
 
     def test_cross_navigation_switches_between_diary_and_footprint(self) -> None:
         diary = self.diary_storage.create_empty_entry()
