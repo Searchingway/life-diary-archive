@@ -20,11 +20,10 @@ Thumbs.db
 dist/
 build/
 *.spec
+*.apk
+*.aab
 
 # User data
 data/
 exports/
 *.log
-
-# 未完成功能
-diary_android/
