@@ -32,12 +32,12 @@
 - 日记页新增最近 18 周绿色热力统计图，可以直观看到写日记的频率。
 - 软件界面完成统一美化，按钮、输入框、列表、页签和分组区域采用统一浅色绿色系样式。
 - 四个页面改为整页滚动布局，每个功能区域可以设计得更大，不再强行挤在一屏里。
-- 完成电脑版直装安装器，安装包位于 `电脑直装版/最终安装包/人生档案安装器.exe`。
+- 完成电脑版直装安装器，安装包通过 GitHub Release 分发，不再作为源码文件提交。
 - 电脑版安装器支持自选安装路径，安装完成后提供“启动人生档案”按钮，不再依赖 `.bat` 启动，避免残留黑色命令行窗口。
 - 电脑版安装后的数据默认保存在安装目录下的 `data/Diary/`，便于整体移动和备份。
 - 同步完成 Qt 6/QML Android 手机版，已生成可安装的签名 APK，并在真机正常安装运行。
 - 手机版接入“人生档案”应用名和自定义启动图标。
-- README、Todo 和测试覆盖同步更新，补充轻计划、交换包和主窗口四页签验证。
+- README、开发说明和测试覆盖同步更新，补充轻计划、交换包和主窗口四页签验证。
 
 ## 界面预览
 
@@ -45,33 +45,29 @@
 
 | 日记 | 足迹 |
 | --- | --- |
-| ![电脑版日记界面](image/电脑版日记界面.png) | ![电脑版足迹界面](image/电脑版足迹界面.png) |
+| ![电脑版日记界面](docs/screenshots/desktop-diary.png) | ![电脑版足迹界面](docs/screenshots/desktop-footprint.png) |
 
 | 读书笔记 | 轻计划 |
 | --- | --- |
-| ![电脑版读书笔记界面](image/电脑版读书笔记界面.png) | ![电脑版轻计划界面](image/电脑版轻计划界面.png) |
+| ![电脑版读书笔记界面](docs/screenshots/desktop-book.png) | ![电脑版轻计划界面](docs/screenshots/desktop-plan.png) |
 
 ### Android 手机版
 
 | 日记 | 足迹 |
 | --- | --- |
-| ![手机版日记界面](image/手机版日记界面.jpg) | ![手机版足迹界面](image/手机版足迹界面.jpg) |
+| ![手机版日记界面](docs/screenshots/android-diary.jpg) | ![手机版足迹界面](docs/screenshots/android-footprint.jpg) |
 
 | 读书笔记 | 轻计划 |
 | --- | --- |
-| ![手机版读书笔记界面](image/手机版读书笔记界面.jpg) | ![手机版轻计划界面](image/手机版轻计划界面.jpg) |
+| ![手机版读书笔记界面](docs/screenshots/android-book.jpg) | ![手机版轻计划界面](docs/screenshots/android-plan.jpg) |
 
 ## 运行
 
 ### 电脑直装版
 
-最终安装包位于：
+Windows 安装器通过 GitHub Release 分发。下载 `人生档案安装器.exe` 后双击运行，可以选择安装路径。
 
-```text
-电脑直装版/最终安装包/人生档案安装器.exe
-```
-
-双击 `人生档案安装器.exe` 后，可以选择安装路径。安装完成后点击安装器里的“启动人生档案”按钮即可运行。
+安装完成后点击安装器里的“启动人生档案”按钮即可运行。
 
 直装版启动程序为 `人生档案.exe`，采用无控制台窗口方式启动，不需要再通过 `.bat` 运行，因此不会残留黑色命令行窗口。
 
@@ -81,11 +77,17 @@
 python main.py
 ```
 
+也可以双击或运行：
+
+```powershell
+.\scripts\run_diary.bat
+```
+
 ## Android 手机版
 
-手机端工程位于 `diary_android/`，基于 Qt 6/QML 实现，已同步桌面版的日记、足迹、读书笔记和轻计划四个模块。
+手机端工程位于 `android/LifeDiaryMobile/`，基于 Qt 6/QML 实现，已同步桌面版的日记、足迹、读书笔记和轻计划四个模块。
 
-当前已完成 Android `arm64-v8a` APK 构建、签名和真机安装验证。签名包文件名为 `LifeDiaryMobile-release-signed.apk`，适合放到 GitHub Release 作为安装包附件；源码仓库保留 Android 工程和构建配置，`build/` 构建产物不作为源码提交。
+当前已完成 Android `arm64-v8a` APK 构建、签名和真机安装验证。签名包文件名为 `LifeDiaryMobile-release-signed.apk`，适合放到 GitHub Release 作为安装包附件；源码仓库只保留 Android 工程和构建配置，`build/` 构建产物不作为源码提交。
 
 ## 项目结构
 
@@ -93,18 +95,25 @@ python main.py
 .
   src/life_dairy/              桌面版 PySide6 源码
   tests/                       桌面版自动化测试
-  diary_android/               Qt 6/QML Android 手机版工程
-  image/                       README 使用的界面截图
-  电脑直装版/最终安装包/        电脑版安装器成品
-  手机直装版/                  Android 签名 APK 成品
+  android/                     Qt 6/QML Android 手机版工程
+    LifeDiaryMobile/
+  docs/
+    screenshots/               README 使用的界面截图
+    dev-notes/                 开发过程说明
+    release-notes/             版本发布说明
+  assets/
+    icons/                     桌面端与移动端图标资源
+  scripts/                     本地运行和构建辅助脚本
+  packaging/windows/           Windows 安装器源码和配置
   data/                        本地运行数据，默认不提交
-  pc_installer_work/           打包临时目录，默认不提交
+  release/                     本地发布输出目录，默认不提交
   README.md                    项目说明
   LICENSE                      MIT 开源许可证
+  pyproject.toml               Python 项目元数据
   requirements.txt             桌面版 Python 依赖
 ```
 
-源码提交时重点保留 `src/`、`tests/`、`diary_android/`、`image/`、`README.md`、`LICENSE` 和依赖配置；运行数据、构建目录和打包中间物通过 `.gitignore` 排除。
+源码提交时重点保留 `src/`、`tests/`、`android/`、`docs/`、`assets/`、`scripts/`、`packaging/`、`README.md`、`LICENSE` 和依赖配置；运行数据、构建目录、安装包、APK 和打包中间物通过 `.gitignore` 排除，并通过 GitHub Release 分发。
 
 ## 数据目录
 

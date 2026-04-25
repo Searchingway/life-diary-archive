@@ -7,6 +7,13 @@ __pycache__/
 .venv/
 venv/
 env/
+.env
+
+# Runtime data
+data/
+exports/
+.tmp_testdata/
+*.log
 
 # IDE
 .vscode/
@@ -19,23 +26,22 @@ Thumbs.db
 # Build
 dist/
 build/
+release/
 *.spec
+!packaging/windows/*.spec
+*.exe
+*.msi
 *.apk
 *.aab
 pc_installer_work/
+电脑直装版/
+手机直装版/
+packaging/windows/payload/
+packaging/windows/installer_payload*/
+packaging/windows/build*/
 diary_android/build/
 diary_android/build-*/
 diary_android/.qtcreator/
-电脑直装版/app_dist/
-电脑直装版/build_app/
-电脑直装版/installer_payload/
-电脑直装版/installer_payload2/
-电脑直装版/installer_src/
-电脑直装版/specs/
-电脑直装版/人生档案安装器.exe
-
-# User data
-data/
-exports/
-*.log
-.tmp_testdata/
+android/**/build/
+android/**/build-*/
+android/**/.qtcreator/
