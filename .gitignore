@@ -8,6 +8,13 @@ __pycache__/
 venv/
 env/
 .env
+.env.*
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Runtime data
 data/
@@ -27,21 +34,48 @@ Thumbs.db
 dist/
 build/
 release/
+*.egg-info/
+*.manifest
 *.spec
 !packaging/windows/*.spec
 *.exe
 *.msi
 *.apk
 *.aab
+*.ap_
+*.keystore
+*.jks
 pc_installer_work/
 电脑直装版/
 手机直装版/
+image/
 packaging/windows/payload/
 packaging/windows/installer_payload*/
 packaging/windows/build*/
+packaging/windows/dist/
+packaging/windows/__pycache__/
+
+# CMake / Qt generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+*.cmake.user
+*.pro.user
+*.qmlc
+*.jsc
+
+# Legacy Android build folders kept locally after migration
 diary_android/build/
 diary_android/build-*/
 diary_android/.qtcreator/
+diary_android/.qtc_clangd/
+
+# Android / Qt generated files
 android/**/build/
 android/**/build-*/
 android/**/.qtcreator/
+android/**/.qtc_clangd/
+android/**/.gradle/
+android/**/local.properties
+android/**/android-build/
