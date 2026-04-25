@@ -1,0 +1,18 @@
+{
+  "id": "eb71e68f1d964b4e9805f32239152f45",
+  "date": "2026-04-22",
+  "title": "第一篇",
+  "images": [
+    {
+      "file_name": "cover.png",
+      "label": "封面图"
+    },
+    {
+      "file_name": "street.png",
+      "label": ""
+    }
+  ],
+  "created_at": "2026-04-25T15:50:49.168567+08:00",
+  "updated_at": "2026-04-25T15:50:49.169169+08:00",
+  "body_file": "content.md"
+}

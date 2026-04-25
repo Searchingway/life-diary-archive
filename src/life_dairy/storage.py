@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Iterable
@@ -209,4 +210,6 @@ class DiaryStorage:
 
 
 def default_data_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "data" / "Diary"
     return Path(__file__).resolve().parents[2] / "data" / "Diary"
