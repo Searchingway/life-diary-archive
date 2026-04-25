@@ -39,6 +39,28 @@
 - 手机版接入“人生档案”应用名和自定义启动图标。
 - README、Todo 和测试覆盖同步更新，补充轻计划、交换包和主窗口四页签验证。
 
+## 界面预览
+
+### 电脑版
+
+| 日记 | 足迹 |
+| --- | --- |
+| ![电脑版日记界面](image/电脑版日记界面.png) | ![电脑版足迹界面](image/电脑版足迹界面.png) |
+
+| 读书笔记 | 轻计划 |
+| --- | --- |
+| ![电脑版读书笔记界面](image/电脑版读书笔记界面.png) | ![电脑版轻计划界面](image/电脑版轻计划界面.png) |
+
+### Android 手机版
+
+| 日记 | 足迹 |
+| --- | --- |
+| ![手机版日记界面](image/手机版日记界面.jpg) | ![手机版足迹界面](image/手机版足迹界面.jpg) |
+
+| 读书笔记 | 轻计划 |
+| --- | --- |
+| ![手机版读书笔记界面](image/手机版读书笔记界面.jpg) | ![手机版轻计划界面](image/手机版轻计划界面.jpg) |
+
 ## 运行
 
 ### 电脑直装版
@@ -64,6 +86,25 @@ python main.py
 手机端工程位于 `diary_android/`，基于 Qt 6/QML 实现，已同步桌面版的日记、足迹、读书笔记和轻计划四个模块。
 
 当前已完成 Android `arm64-v8a` APK 构建、签名和真机安装验证。签名包文件名为 `LifeDiaryMobile-release-signed.apk`，适合放到 GitHub Release 作为安装包附件；源码仓库保留 Android 工程和构建配置，`build/` 构建产物不作为源码提交。
+
+## 项目结构
+
+```text
+.
+  src/life_dairy/              桌面版 PySide6 源码
+  tests/                       桌面版自动化测试
+  diary_android/               Qt 6/QML Android 手机版工程
+  image/                       README 使用的界面截图
+  电脑直装版/最终安装包/        电脑版安装器成品
+  手机直装版/                  Android 签名 APK 成品
+  data/                        本地运行数据，默认不提交
+  pc_installer_work/           打包临时目录，默认不提交
+  README.md                    项目说明
+  LICENSE                      MIT 开源许可证
+  requirements.txt             桌面版 Python 依赖
+```
+
+源码提交时重点保留 `src/`、`tests/`、`diary_android/`、`image/`、`README.md`、`LICENSE` 和依赖配置；运行数据、构建目录和打包中间物通过 `.gitignore` 排除。
 
 ## 数据目录
 
@@ -226,6 +267,10 @@ data/
 ```powershell
 python -B -m unittest discover -s tests -v
 ```
+
+## 开源许可
+
+本项目使用 MIT License，详见 [LICENSE](LICENSE)。
 
 ## 版本迭代史
 
