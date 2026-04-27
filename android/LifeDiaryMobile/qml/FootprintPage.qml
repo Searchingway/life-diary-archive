@@ -8,6 +8,8 @@ Page {
 
     property var placeItems: []
     property var visitItems: []
+    property var placeImages: []
+    property var visitImages: []
     property string currentPlaceId: ""
     property string currentVisitId: ""
 
@@ -22,6 +24,7 @@ Page {
         currentPlaceId = place.id
         placeNameField.text = place.place_name
         summaryField.text = place.summary
+        setPlaceImages(place.images || [])
         visitItems = []
         startNewVisit()
     }
@@ -34,6 +37,7 @@ Page {
         currentPlaceId = place.id
         placeNameField.text = place.place_name
         summaryField.text = place.summary
+        setPlaceImages(place.images || [])
         visitItems = place.visits || []
         if (visitItems.length > 0) {
             loadVisit(visitItems[0])
@@ -46,10 +50,12 @@ Page {
         const saved = archiveStore.saveFootprint({
             "id": currentPlaceId,
             "place_name": placeNameField.text,
-            "summary": summaryField.text
+            "summary": summaryField.text,
+            "images": placeImages
         })
         if (saved && saved.id) {
             currentPlaceId = saved.id
+            setPlaceImages(saved.images || [])
             visitItems = saved.visits || []
             refresh()
         }
@@ -61,12 +67,14 @@ Page {
         currentVisitId = visit.id
         visitDateField.text = visit.date
         visitThoughtField.text = visit.thought
+        setVisitImages(visit.images || [])
     }
 
     function loadVisit(visit) {
         currentVisitId = visit.id
         visitDateField.text = visit.date
         visitThoughtField.text = visit.thought
+        setVisitImages(visit.images || [])
     }
 
     function saveVisit() {
@@ -77,11 +85,35 @@ Page {
         const updated = archiveStore.saveFootprintVisit(currentPlaceId, {
             "id": currentVisitId,
             "date": visitDateField.text,
-            "thought": visitThoughtField.text
+            "thought": visitThoughtField.text,
+            "images": visitImages
         })
         if (updated && updated.id) {
+            const savedVisitId = currentVisitId
+            currentPlaceId = updated.id
+            setPlaceImages(updated.images || [])
             visitItems = updated.visits || []
+            for (let i = 0; i < visitItems.length; ++i) {
+                if (visitItems[i].id === savedVisitId) {
+                    loadVisit(visitItems[i])
+                    break
+                }
+            }
             refresh()
+        }
+    }
+
+    function setPlaceImages(images) {
+        placeImages = images || []
+        if (typeof placeImagePanel !== "undefined" && placeImagePanel !== null) {
+            placeImagePanel.setImages(placeImages)
+        }
+    }
+
+    function setVisitImages(images) {
+        visitImages = images || []
+        if (typeof visitImagePanel !== "undefined" && visitImagePanel !== null) {
+            visitImagePanel.setImages(visitImages)
         }
     }
 
@@ -147,7 +179,7 @@ Page {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
-                height: placeItems.length === 0 ? 88 : Math.min(310, placeItems.length * 84)
+                Layout.preferredHeight: placeItems.length === 0 ? 88 : Math.min(310, placeItems.length * 84)
                 spacing: 8
                 clip: true
                 model: placeItems
@@ -184,14 +216,32 @@ Page {
                 text: "地点简介"
             }
 
-            TextArea {
-                id: summaryField
+            ScrollView {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
                 Layout.preferredHeight: 150
-                wrapMode: TextEdit.Wrap
-                placeholderText: "这个地点给你的长期印象"
+                clip: true
+
+                TextArea {
+                    id: summaryField
+                    wrapMode: TextEdit.Wrap
+                    placeholderText: "这个地点给你的长期印象"
+                }
+            }
+
+            ImageListEditor {
+                id: placeImagePanel
+                Layout.fillWidth: true
+                Layout.leftMargin: 16
+                Layout.rightMargin: 16
+                title: "地点图片"
+                scope: "footprintPlace"
+                primaryId: page.currentPlaceId
+                emptyText: "还没有给这个地点插入图片"
+                onImagesUpdated: function(images) {
+                    page.placeImages = images
+                }
             }
 
             RowLayout {
@@ -254,7 +304,7 @@ Page {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
-                height: visitItems.length === 0 ? 0 : Math.min(230, visitItems.length * 76)
+                Layout.preferredHeight: visitItems.length === 0 ? 0 : Math.min(230, visitItems.length * 76)
                 spacing: 8
                 clip: true
                 model: visitItems
@@ -292,14 +342,33 @@ Page {
                 text: "当天感悟"
             }
 
-            TextArea {
-                id: visitThoughtField
+            ScrollView {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
                 Layout.preferredHeight: 220
-                wrapMode: TextEdit.Wrap
-                placeholderText: "这一天在这里留下了什么"
+                clip: true
+
+                TextArea {
+                    id: visitThoughtField
+                    wrapMode: TextEdit.Wrap
+                    placeholderText: "这一天在这里留下了什么"
+                }
+            }
+
+            ImageListEditor {
+                id: visitImagePanel
+                Layout.fillWidth: true
+                Layout.leftMargin: 16
+                Layout.rightMargin: 16
+                title: "当天图片"
+                scope: "footprintVisit"
+                primaryId: page.currentPlaceId
+                secondaryId: page.currentVisitId
+                emptyText: "还没有给这条日期记录插入图片"
+                onImagesUpdated: function(images) {
+                    page.visitImages = images
+                }
             }
 
             RowLayout {

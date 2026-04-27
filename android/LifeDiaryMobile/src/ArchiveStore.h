@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -27,6 +28,19 @@ public:
     Q_INVOKABLE bool deleteDiary(const QString &entryId);
     Q_INVOKABLE QVariantMap diaryHeatmap(int weeks = 18) const;
     Q_INVOKABLE QString exportModulePackage(const QString &module);
+    Q_INVOKABLE QVariantList importImage(
+        const QString &scope,
+        const QString &primaryId,
+        const QString &secondaryId,
+        const QVariantList &currentImages,
+        const QUrl &sourceUrl);
+    Q_INVOKABLE QVariantList removeImageAt(const QVariantList &currentImages, int index) const;
+    Q_INVOKABLE QVariantList updateImageLabel(const QVariantList &currentImages, int index, const QString &label) const;
+    Q_INVOKABLE QString imageFileUrl(
+        const QString &scope,
+        const QString &primaryId,
+        const QString &secondaryId,
+        const QString &fileName) const;
 
     Q_INVOKABLE QVariantList searchFootprints(const QString &query) const;
     Q_INVOKABLE QVariantMap createFootprint() const;
@@ -79,6 +93,11 @@ private:
     bool softDelete(const QString &jsonPath, const QString &missingMessage);
 
     QVariantList readImages(const QVariant &value) const;
+    QString imageDirForScope(const QString &scope, const QString &primaryId, const QString &secondaryId) const;
+    QString imageFileNameFromUrl(const QUrl &sourceUrl) const;
+    QString uniqueImageName(const QString &imagesDirPath, const QString &originalName) const;
+    bool copyImageIntoDir(const QUrl &sourceUrl, const QString &targetPath);
+    void pruneUnusedImages(const QString &imagesDirPath, const QVariantList &images) const;
     QVariantList readRelatedDiaries(const QVariant &value) const;
     QStringList readTags(const QVariant &value) const;
     QVariantList readVisitIds(const QVariantMap &place) const;

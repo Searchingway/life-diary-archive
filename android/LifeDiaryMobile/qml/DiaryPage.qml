@@ -8,6 +8,7 @@ Page {
 
     property var diaryItems: []
     property var heatmap: ({})
+    property var diaryImages: []
     property string currentId: ""
 
     background: Rectangle { color: "#F6F7F3" }
@@ -23,6 +24,7 @@ Page {
         dateField.text = entry.date
         titleField.text = entry.title
         bodyField.text = entry.body
+        setDiaryImages(entry.images || [])
     }
 
     function loadEntry(entryId) {
@@ -34,6 +36,7 @@ Page {
         dateField.text = entry.date
         titleField.text = entry.title
         bodyField.text = entry.body
+        setDiaryImages(entry.images || [])
     }
 
     function saveCurrent() {
@@ -41,11 +44,20 @@ Page {
             "id": currentId,
             "date": dateField.text,
             "title": titleField.text,
-            "body": bodyField.text
+            "body": bodyField.text,
+            "images": diaryImages
         })
         if (saved && saved.id) {
             currentId = saved.id
+            setDiaryImages(saved.images || [])
             refresh()
+        }
+    }
+
+    function setDiaryImages(images) {
+        diaryImages = images || []
+        if (typeof diaryImagePanel !== "undefined" && diaryImagePanel !== null) {
+            diaryImagePanel.setImages(diaryImages)
         }
     }
 
@@ -111,7 +123,7 @@ Page {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
-                height: diaryItems.length === 0 ? 88 : Math.min(330, diaryItems.length * 84)
+                Layout.preferredHeight: diaryItems.length === 0 ? 88 : Math.min(330, diaryItems.length * 84)
                 spacing: 8
                 clip: true
                 model: diaryItems
@@ -234,14 +246,32 @@ Page {
                 text: "正文"
             }
 
-            TextArea {
-                id: bodyField
+            ScrollView {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
                 Layout.preferredHeight: 340
-                wrapMode: TextEdit.Wrap
-                placeholderText: "今天发生了什么"
+                clip: true
+
+                TextArea {
+                    id: bodyField
+                    wrapMode: TextEdit.Wrap
+                    placeholderText: "今天发生了什么"
+                }
+            }
+
+            ImageListEditor {
+                id: diaryImagePanel
+                Layout.fillWidth: true
+                Layout.leftMargin: 16
+                Layout.rightMargin: 16
+                title: "已插入图片"
+                scope: "diary"
+                primaryId: page.currentId
+                emptyText: "还没有给这篇日记插入图片"
+                onImagesUpdated: function(images) {
+                    page.diaryImages = images
+                }
             }
 
             RowLayout {

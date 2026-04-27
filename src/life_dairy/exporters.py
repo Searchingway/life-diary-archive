@@ -198,11 +198,16 @@ finally {
             paragraph = document.add_paragraph("（正文为空）")
             self._set_run_font(paragraph.runs, size=Pt(12))
 
-        exportable_images = [
-            (image, image_lookup.get(image.file_name))
-            for image in entry.images
-            if image_lookup.get(image.file_name) is not None
-        ]
+        exportable_images = []
+        for image in entry.images:
+            image_path = image_lookup.get(image.file_name)
+            if image_path is None:
+                continue
+            image_path = Path(image_path)
+            if not image_path.exists():
+                continue
+            exportable_images.append((image, image_path))
+
         if exportable_images:
             heading = document.add_heading("图片", level=1)
             self._set_run_font(heading.runs, size=Pt(14), bold=True)

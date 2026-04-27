@@ -11,7 +11,9 @@
 #include <QMap>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
 #include <QStandardPaths>
+#include <QUrl>
 #include <QUuid>
 
 #include <algorithm>
@@ -286,6 +288,7 @@ QVariantMap ArchiveStore::saveDiary(const QVariantMap &payload)
         setError(QStringLiteral("日记保存失败"));
         return {};
     }
+    pruneUnusedImages(QDir(entryDirPath).filePath(QStringLiteral("images")), images);
 
     setToast(QStringLiteral("日记已保存"));
     emit dataChanged();
@@ -432,6 +435,85 @@ QString ArchiveStore::exportModulePackage(const QString &module)
     return displayPath;
 }
 
+QVariantList ArchiveStore::importImage(
+    const QString &scope,
+    const QString &primaryId,
+    const QString &secondaryId,
+    const QVariantList &currentImages,
+    const QUrl &sourceUrl)
+{
+    clearError();
+    QVariantList images = readImages(currentImages);
+    const QString imagesDirPath = imageDirForScope(scope, primaryId, secondaryId);
+    if (imagesDirPath.isEmpty()) {
+        setError(QStringLiteral("请先选择或创建可插入图片的记录"));
+        return images;
+    }
+    if (!ensureDir(imagesDirPath)) {
+        setError(QStringLiteral("无法创建图片目录"));
+        return images;
+    }
+
+    const QString targetName = uniqueImageName(imagesDirPath, imageFileNameFromUrl(sourceUrl));
+    if (targetName.isEmpty()) {
+        setError(QStringLiteral("无法识别图片文件名"));
+        return images;
+    }
+
+    const QString targetPath = QDir(imagesDirPath).filePath(targetName);
+    if (!copyImageIntoDir(sourceUrl, targetPath)) {
+        setError(QStringLiteral("图片导入失败"));
+        return images;
+    }
+
+    QVariantMap image;
+    image.insert(QStringLiteral("file_name"), targetName);
+    image.insert(QStringLiteral("label"), QString());
+    images.append(image);
+    setToast(QStringLiteral("图片已加入，保存后生效"));
+    return images;
+}
+
+QVariantList ArchiveStore::removeImageAt(const QVariantList &currentImages, int index) const
+{
+    QVariantList images = readImages(currentImages);
+    if (index >= 0 && index < images.size()) {
+        images.removeAt(index);
+    }
+    return images;
+}
+
+QVariantList ArchiveStore::updateImageLabel(const QVariantList &currentImages, int index, const QString &label) const
+{
+    QVariantList images = readImages(currentImages);
+    if (index < 0 || index >= images.size()) {
+        return images;
+    }
+
+    QVariantMap image = images.at(index).toMap();
+    image.insert(QStringLiteral("label"), label.trimmed());
+    images.replace(index, image);
+    return images;
+}
+
+QString ArchiveStore::imageFileUrl(
+    const QString &scope,
+    const QString &primaryId,
+    const QString &secondaryId,
+    const QString &fileName) const
+{
+    const QString imagesDirPath = imageDirForScope(scope, primaryId, secondaryId);
+    if (imagesDirPath.isEmpty() || fileName.trimmed().isEmpty()) {
+        return {};
+    }
+
+    const QFileInfo fileInfo(QDir(imagesDirPath).filePath(QFileInfo(fileName).fileName()));
+    if (!fileInfo.exists() || !fileInfo.isFile()) {
+        return {};
+    }
+    return QUrl::fromLocalFile(fileInfo.absoluteFilePath()).toString();
+}
+
 QVariantList ArchiveStore::searchFootprints(const QString &query) const
 {
     QVariantList items;
@@ -521,6 +603,7 @@ QVariantMap ArchiveStore::saveFootprint(const QVariantMap &payload)
         setError(QStringLiteral("足迹保存失败"));
         return {};
     }
+    pruneUnusedImages(QDir(placeDirPath).filePath(QStringLiteral("images")), images);
 
     setToast(QStringLiteral("地点足迹已保存"));
     emit dataChanged();
@@ -587,6 +670,7 @@ QVariantMap ArchiveStore::saveFootprintVisit(const QString &placeId, const QVari
         setError(QStringLiteral("足迹日期保存失败"));
         return {};
     }
+    pruneUnusedImages(QDir(visitDirPath).filePath(QStringLiteral("images")), images);
 
     QVariantMap placeMeta = readJsonFile(QDir(placeDirPath).filePath(QStringLiteral("footprint.json")));
     QVariantList visitIds = placeMeta.value(QStringLiteral("visit_ids")).toList();
@@ -753,6 +837,7 @@ QVariantMap ArchiveStore::saveBook(const QVariantMap &payload)
         setError(QStringLiteral("读书笔记保存失败"));
         return {};
     }
+    pruneUnusedImages(QDir(bookDirPath).filePath(QStringLiteral("images")), images);
 
     setToast(QStringLiteral("读书笔记已保存"));
     emit dataChanged();
@@ -1215,6 +1300,122 @@ QVariantList ArchiveStore::readImages(const QVariant &value) const
         }
     }
     return images;
+}
+
+QString ArchiveStore::imageDirForScope(const QString &scope, const QString &primaryId, const QString &secondaryId) const
+{
+    const auto cleanId = [](const QString &value) {
+        return value.trimmed();
+    };
+    const auto isSafeId = [](const QString &value) {
+        return !value.isEmpty()
+            && !value.contains(QLatin1Char('/'))
+            && !value.contains(QLatin1Char('\\'))
+            && !value.contains(QStringLiteral(".."));
+    };
+
+    const QString key = scope.trimmed();
+    const QString first = cleanId(primaryId);
+    const QString second = cleanId(secondaryId);
+
+    if (key == QStringLiteral("diary") && isSafeId(first)) {
+        return QDir(QDir(entriesPath()).filePath(first)).filePath(QStringLiteral("images"));
+    }
+    if (key == QStringLiteral("footprintPlace") && isSafeId(first)) {
+        return QDir(QDir(footprintsPath()).filePath(first)).filePath(QStringLiteral("images"));
+    }
+    if (key == QStringLiteral("footprintVisit") && isSafeId(first) && isSafeId(second)) {
+        return QDir(QDir(QDir(QDir(footprintsPath()).filePath(first)).filePath(QStringLiteral("visits"))).filePath(second))
+            .filePath(QStringLiteral("images"));
+    }
+    if (key == QStringLiteral("book") && isSafeId(first)) {
+        return QDir(QDir(booksPath()).filePath(first)).filePath(QStringLiteral("images"));
+    }
+    return {};
+}
+
+QString ArchiveStore::imageFileNameFromUrl(const QUrl &sourceUrl) const
+{
+    QString candidate;
+    if (sourceUrl.isLocalFile()) {
+        candidate = QFileInfo(sourceUrl.toLocalFile()).fileName();
+    }
+    if (candidate.trimmed().isEmpty()) {
+        candidate = sourceUrl.fileName();
+    }
+    if (candidate.trimmed().isEmpty()) {
+        candidate = QStringLiteral("image.jpg");
+    }
+
+    candidate = QFileInfo(candidate).fileName();
+    candidate.replace(QRegularExpression(QStringLiteral("[<>:\"/\\\\|?*\\x00-\\x1F]+")), QStringLiteral("_"));
+    if (candidate.trimmed().isEmpty() || candidate == QStringLiteral(".") || candidate == QStringLiteral("..")) {
+        candidate = QStringLiteral("image.jpg");
+    }
+    if (QFileInfo(candidate).suffix().trimmed().isEmpty()) {
+        candidate.append(QStringLiteral(".jpg"));
+    }
+    return candidate;
+}
+
+QString ArchiveStore::uniqueImageName(const QString &imagesDirPath, const QString &originalName) const
+{
+    const QString cleanName = imageFileNameFromUrl(QUrl::fromLocalFile(originalName));
+    const QFileInfo cleanInfo(cleanName);
+    const QString stem = cleanInfo.completeBaseName().isEmpty() ? QStringLiteral("image") : cleanInfo.completeBaseName();
+    const QString suffix = cleanInfo.suffix().isEmpty() ? QStringLiteral(".jpg") : QStringLiteral(".%1").arg(cleanInfo.suffix());
+
+    QString candidate = stem + suffix;
+    int counter = 1;
+    const QDir imagesDir(imagesDirPath);
+    while (QFileInfo::exists(imagesDir.filePath(candidate))) {
+        candidate = QStringLiteral("%1_%2%3").arg(stem).arg(counter).arg(suffix);
+        ++counter;
+    }
+    return candidate;
+}
+
+bool ArchiveStore::copyImageIntoDir(const QUrl &sourceUrl, const QString &targetPath)
+{
+    if (sourceUrl.isEmpty() || targetPath.trimmed().isEmpty()) {
+        return false;
+    }
+
+    QString sourcePath = sourceUrl.isLocalFile() ? sourceUrl.toLocalFile() : sourceUrl.toString();
+    QFile source(sourcePath);
+    if (!source.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+
+    QSaveFile target(targetPath);
+    if (!target.open(QIODevice::WriteOnly)) {
+        return false;
+    }
+    target.write(source.readAll());
+    return target.commit();
+}
+
+void ArchiveStore::pruneUnusedImages(const QString &imagesDirPath, const QVariantList &images) const
+{
+    QDir imagesDir(imagesDirPath);
+    if (!imagesDir.exists()) {
+        return;
+    }
+
+    QSet<QString> keepNames;
+    for (const QVariant &item : readImages(images)) {
+        const QString fileName = item.toMap().value(QStringLiteral("file_name")).toString().trimmed();
+        if (!fileName.isEmpty()) {
+            keepNames.insert(QFileInfo(fileName).fileName());
+        }
+    }
+
+    const QFileInfoList children = imagesDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+    for (const QFileInfo &child : children) {
+        if (!keepNames.contains(child.fileName())) {
+            QFile::remove(child.absoluteFilePath());
+        }
+    }
 }
 
 QVariantList ArchiveStore::readRelatedDiaries(const QVariant &value) const

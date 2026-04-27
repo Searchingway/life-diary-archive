@@ -39,8 +39,6 @@ from .ui_helpers import make_scroll_area
 class ExportRangeDialog(QDialog):
     def __init__(
         self,
-        min_date: QDate,
-        max_date: QDate,
         initial_date: QDate,
         parent: QWidget | None = None,
     ):
@@ -57,13 +55,11 @@ class ExportRangeDialog(QDialog):
         self.start_date_edit = QDateEdit(self)
         self.start_date_edit.setCalendarPopup(True)
         self.start_date_edit.setDisplayFormat("yyyy-MM-dd")
-        self.start_date_edit.setDateRange(min_date, max_date)
         self.start_date_edit.setDate(initial_date)
 
         self.end_date_edit = QDateEdit(self)
         self.end_date_edit.setCalendarPopup(True)
         self.end_date_edit.setDisplayFormat("yyyy-MM-dd")
-        self.end_date_edit.setDateRange(min_date, max_date)
         self.end_date_edit.setDate(initial_date)
 
         form.addRow("开始日期", self.start_date_edit)
@@ -486,13 +482,11 @@ class DiaryPage(QWidget):
             QMessageBox.information(self, "暂无可导出内容", "当前没有可导出的日记。")
             return
 
-        min_date = QDate.fromString(min(entry.date for entry in available_entries), "yyyy-MM-dd")
-        max_date = QDate.fromString(max(entry.date for entry in available_entries), "yyyy-MM-dd")
         current_date = QDate.fromString(self.current_entry.date, "yyyy-MM-dd")
         if not current_date.isValid():
-            current_date = max_date
+            current_date = QDate.currentDate()
 
-        range_dialog = ExportRangeDialog(min_date, max_date, current_date, self)
+        range_dialog = ExportRangeDialog(current_date, self)
         if range_dialog.exec() != QDialog.DialogCode.Accepted:
             return
 

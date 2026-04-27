@@ -122,7 +122,7 @@ Page {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
-                height: planItems.length === 0 ? 88 : Math.min(310, planItems.length * 84)
+                Layout.preferredHeight: planItems.length === 0 ? 88 : Math.min(310, planItems.length * 84)
                 spacing: 8
                 clip: true
                 model: planItems
@@ -208,14 +208,18 @@ Page {
                 text: "备注"
             }
 
-            TextArea {
-                id: notesField
+            ScrollView {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
                 Layout.preferredHeight: 380
-                wrapMode: TextEdit.Wrap
-                placeholderText: "这里写轻量计划，不做复杂项目管理，只记录下一步。"
+                clip: true
+
+                TextArea {
+                    id: notesField
+                    wrapMode: TextEdit.Wrap
+                    placeholderText: "这里写轻量计划，不做复杂项目管理，只记录下一步。"
+                }
             }
 
             RowLayout {

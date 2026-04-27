@@ -7,6 +7,7 @@ Page {
     id: page
 
     property var bookItems: []
+    property var bookImages: []
     property string currentBookId: ""
 
     background: Rectangle { color: "#F6F7F3" }
@@ -26,6 +27,7 @@ Page {
         tagsField.text = book.tagsText
         summaryField.text = book.summary
         notesField.text = book.notes
+        setBookImages(book.images || [])
     }
 
     function loadBook(bookId) {
@@ -43,6 +45,7 @@ Page {
         tagsField.text = book.tagsText
         summaryField.text = book.summary
         notesField.text = book.notes
+        setBookImages(book.images || [])
     }
 
     function saveCurrent() {
@@ -55,11 +58,20 @@ Page {
             "finish_date": finishDateField.text,
             "tagsText": tagsField.text,
             "summary": summaryField.text,
-            "notes": notesField.text
+            "notes": notesField.text,
+            "images": bookImages
         })
         if (saved && saved.id) {
             currentBookId = saved.id
+            setBookImages(saved.images || [])
             refresh()
+        }
+    }
+
+    function setBookImages(images) {
+        bookImages = images || []
+        if (typeof bookImagePanel !== "undefined" && bookImagePanel !== null) {
+            bookImagePanel.setImages(bookImages)
         }
     }
 
@@ -125,7 +137,7 @@ Page {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
-                height: bookItems.length === 0 ? 88 : Math.min(310, bookItems.length * 84)
+                Layout.preferredHeight: bookItems.length === 0 ? 88 : Math.min(310, bookItems.length * 84)
                 spacing: 8
                 clip: true
                 model: bookItems
@@ -240,14 +252,18 @@ Page {
                 text: "阅读摘要"
             }
 
-            TextArea {
-                id: summaryField
+            ScrollView {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
                 Layout.preferredHeight: 160
-                wrapMode: TextEdit.Wrap
-                placeholderText: "这本书讲了什么"
+                clip: true
+
+                TextArea {
+                    id: summaryField
+                    wrapMode: TextEdit.Wrap
+                    placeholderText: "这本书讲了什么"
+                }
             }
 
             FieldLabel {
@@ -257,14 +273,33 @@ Page {
                 text: "读书笔记"
             }
 
-            TextArea {
-                id: notesField
+            ScrollView {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
                 Layout.preferredHeight: 340
-                wrapMode: TextEdit.Wrap
-                placeholderText: "书和你发生了什么关系"
+                clip: true
+
+                TextArea {
+                    id: notesField
+                    wrapMode: TextEdit.Wrap
+                    placeholderText: "书和你发生了什么关系"
+                }
+            }
+
+            ImageListEditor {
+                id: bookImagePanel
+                Layout.fillWidth: true
+                Layout.leftMargin: 16
+                Layout.rightMargin: 16
+                title: "书封 / 书籍图片"
+                scope: "book"
+                primaryId: page.currentBookId
+                emptyText: "还没有给这本书插入图片"
+                addButtonText: "添加书封/图片"
+                onImagesUpdated: function(images) {
+                    page.bookImages = images
+                }
             }
 
             RowLayout {

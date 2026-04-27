@@ -13,6 +13,7 @@ pip-wheel-metadata/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.gradle-api27-home/
 .coverage
 htmlcov/
 
@@ -79,3 +80,7 @@ android/**/.qtc_clangd/
 android/**/.gradle/
 android/**/local.properties
 android/**/android-build/
+
+# 签名
+android/**/android-release.keystore
+
