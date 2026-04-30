@@ -50,12 +50,14 @@ class DiaryMainWindowTests(unittest.TestCase):
         shutil.rmtree(self.case_dir, ignore_errors=True)
 
     def test_main_window_has_desktop_tabs(self) -> None:
-        self.assertEqual(5, self.window.tabs.count())
-        self.assertEqual("日记", self.window.tabs.tabText(0))
-        self.assertEqual("足迹", self.window.tabs.tabText(1))
-        self.assertEqual("读书", self.window.tabs.tabText(2))
-        self.assertEqual("轻计划", self.window.tabs.tabText(3))
-        self.assertEqual("教训与反思", self.window.tabs.tabText(4))
+        self.assertEqual(6, self.window.tabs.count())
+        self.assertEqual("总览", self.window.tabs.tabText(0))
+        self.assertEqual("日记", self.window.tabs.tabText(1))
+        self.assertEqual("足迹", self.window.tabs.tabText(2))
+        self.assertEqual("读书", self.window.tabs.tabText(3))
+        self.assertEqual("轻计划", self.window.tabs.tabText(4))
+        self.assertEqual("教训与反思", self.window.tabs.tabText(5))
+        self.assertIsNotNone(self.window.overview_page)
 
     def test_cross_navigation_switches_between_diary_and_footprint(self) -> None:
         diary = self.diary_storage.create_empty_entry()

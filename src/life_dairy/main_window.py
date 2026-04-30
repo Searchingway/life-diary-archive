@@ -9,6 +9,8 @@ from .footprint_page import FootprintPage
 from .footprint_storage import FootprintStorage
 from .lesson_page import LessonPage
 from .lesson_storage import LessonStorage
+from .overview import OverviewService
+from .overview_page import OverviewPage
 from .plan_page import PlanPage
 from .plan_storage import PlanStorage
 from .storage import DiaryStorage
@@ -32,16 +34,27 @@ class DiaryMainWindow(QMainWindow):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("人生档案 Diary - 日记、足迹、读书与反思")
+        self.setWindowTitle("人生档案 Diary - 总览、日记、足迹、读书与反思")
         self.resize(1260, 840)
 
         self.tabs = QTabWidget(self)
+        self.overview_page = OverviewPage(
+            OverviewService(
+                self.diary_storage,
+                self.footprint_storage,
+                self.book_storage,
+                self.plan_storage,
+                self.lesson_storage,
+            ),
+            self.tabs,
+        )
         self.diary_page = DiaryPage(self.diary_storage, self.footprint_storage, self.tabs)
         self.footprint_page = FootprintPage(self.footprint_storage, self.diary_storage, self.tabs)
         self.book_page = BookPage(self.book_storage, self.diary_storage, self.tabs)
         self.plan_page = PlanPage(self.plan_storage, self.tabs)
         self.lesson_page = LessonPage(self.lesson_storage, self.diary_storage, self.tabs)
 
+        self.tabs.addTab(self.overview_page, "总览")
         self.tabs.addTab(self.diary_page, "日记")
         self.tabs.addTab(self.footprint_page, "足迹")
         self.tabs.addTab(self.book_page, "读书")
@@ -82,11 +95,12 @@ class DiaryMainWindow(QMainWindow):
         book_title = "读书 *" if self.book_page.has_unsaved_changes() else "读书"
         plan_title = "轻计划 *" if self.plan_page.has_unsaved_changes() else "轻计划"
         lesson_title = "教训与反思 *" if self.lesson_page.has_unsaved_changes() else "教训与反思"
-        self.tabs.setTabText(0, diary_title)
-        self.tabs.setTabText(1, footprint_title)
-        self.tabs.setTabText(2, book_title)
-        self.tabs.setTabText(3, plan_title)
-        self.tabs.setTabText(4, lesson_title)
+        self.tabs.setTabText(0, "总览")
+        self.tabs.setTabText(1, diary_title)
+        self.tabs.setTabText(2, footprint_title)
+        self.tabs.setTabText(3, book_title)
+        self.tabs.setTabText(4, plan_title)
+        self.tabs.setTabText(5, lesson_title)
 
     def _apply_style(self) -> None:
         self.setStyleSheet(
