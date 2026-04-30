@@ -62,6 +62,7 @@ class DiaryMainWindow(QMainWindow):
         self.tabs.addTab(self.lesson_page, "教训与反思")
         self.setCentralWidget(self.tabs)
         self._apply_style()
+        self._previous_tab_index = self.tabs.currentIndex()
 
         self.diary_page.dirty_state_changed.connect(self._update_tab_titles)
         self.footprint_page.dirty_state_changed.connect(self._update_tab_titles)
@@ -72,6 +73,7 @@ class DiaryMainWindow(QMainWindow):
         self.footprint_page.open_diary_requested.connect(self._open_diary_for_date)
         self.book_page.open_diary_requested.connect(self._open_diary_from_book)
         self.lesson_page.open_diary_requested.connect(self._open_diary_from_lesson)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         self.statusBar().showMessage(f"数据目录：{self.diary_storage.root_dir}", 6000)
         self._update_tab_titles()
@@ -88,6 +90,24 @@ class DiaryMainWindow(QMainWindow):
                 return
 
         event.accept()
+
+    def _on_tab_changed(self, current_index: int) -> None:
+        previous_index = getattr(self, "_previous_tab_index", current_index)
+        if previous_index != current_index:
+            previous_page = self.tabs.widget(previous_index)
+            if (
+                hasattr(previous_page, "maybe_finish_pending_changes")
+                and not previous_page.maybe_finish_pending_changes()
+            ):
+                previous_blocked = self.tabs.blockSignals(True)
+                self.tabs.setCurrentIndex(previous_index)
+                self.tabs.blockSignals(previous_blocked)
+                return
+
+        current_page = self.tabs.widget(current_index)
+        if current_page is self.overview_page:
+            self.overview_page.refresh_overview()
+        self._previous_tab_index = current_index
 
     def _update_tab_titles(self) -> None:
         diary_title = "日记 *" if self.diary_page.has_unsaved_changes() else "日记"

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QComboBox,
 )
 
+from .autosave import AutoSaveMixin
 from .book_storage import BookStorage
 from .exchange import ExchangePackageExporter
 from .models import BookEntry, BookImageDraft, BookRelatedDiary
@@ -100,7 +101,7 @@ class DiaryPickerDialog(QDialog):
         del blocker
 
 
-class BookPage(QWidget):
+class BookPage(AutoSaveMixin, QWidget):
     dirty_state_changed = Signal(bool)
     open_diary_requested = Signal(str, str)
 
@@ -119,6 +120,7 @@ class BookPage(QWidget):
         self._is_loading_form = False
         self._is_loading_image_details = False
         self._build_ui()
+        self._init_auto_save()
         self.refresh_book_list()
         if self.book_list.count() > 0:
             self.book_list.setCurrentRow(0)
@@ -129,7 +131,7 @@ class BookPage(QWidget):
         return self.is_dirty
 
     def maybe_finish_pending_changes(self) -> bool:
-        return self._maybe_keep_changes()
+        return AutoSaveMixin.maybe_finish_pending_changes(self)
 
     def _build_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -371,21 +373,23 @@ class BookPage(QWidget):
         self.book_list.blockSignals(False)
         self._show_status("已创建新的读书笔记草稿。", 3000)
 
-    def save_book(self) -> None:
+    def save_book(self) -> bool:
         book = self._read_form()
         try:
             saved = self.storage.save_book(book, self.image_items)
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", f"保存读书笔记时出错：\n{exc}")
-            return
+            return False
 
         self._fill_form(saved)
         self.refresh_book_list(select_id=saved.id)
         self._show_status("已保存读书笔记到本地。", 3000)
+        return True
 
     def reload_current_book(self) -> None:
         if self.current_book is None:
             return
+        self._suspend_auto_save()
         if self.is_dirty:
             reply = QMessageBox.question(
                 self,
@@ -395,16 +399,19 @@ class BookPage(QWidget):
                 QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
+                self._resume_auto_save()
                 return
         if self.current_book.id and self.storage.book_dir(self.current_book.id).exists():
             try:
                 book = self.storage.load_book(self.current_book.id)
             except Exception as exc:
                 QMessageBox.critical(self, "读取失败", f"恢复已保存内容时出错：\n{exc}")
+                self._resume_auto_save()
                 return
             self._fill_form(book)
             self.refresh_book_list(select_id=book.id)
             self._show_status("已恢复到上次保存的读书笔记内容。", 3000)
+        self._resume_auto_save()
 
     def delete_current_book(self) -> None:
         if self.current_book is None:
@@ -795,30 +802,33 @@ class BookPage(QWidget):
 
     def _set_dirty(self, is_dirty: bool) -> None:
         if self.is_dirty == is_dirty:
+            if is_dirty:
+                self._on_dirty_state_changed_for_autosave(True)
             return
         self.is_dirty = is_dirty
         self.dirty_state_changed.emit(self.is_dirty)
+        self._on_dirty_state_changed_for_autosave(self.is_dirty)
 
     def _maybe_keep_changes(self) -> bool:
-        if not self.is_dirty:
-            return True
+        return self.maybe_finish_pending_changes()
 
-        reply = QMessageBox.question(
-            self,
-            "未保存更改",
-            "当前读书笔记有未保存内容，是否先保存？",
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save,
+    def _auto_save_now(self) -> bool:
+        return self.save_book()
+
+    def _auto_save_has_meaningful_content(self) -> bool:
+        if self.current_book is None:
+            return False
+        if self.storage.book_dir(self.current_book.id).exists():
+            return True
+        return bool(
+            self.title_input.text().strip()
+            or self.author_input.text().strip()
+            or self.tags_input.text().strip()
+            or self.summary_edit.toPlainText().strip()
+            or self.notes_edit.toPlainText().strip()
+            or self.image_items
+            or self.current_book.related_diaries
         )
-
-        if reply == QMessageBox.StandardButton.Save:
-            self.save_book()
-            return not self.is_dirty
-        if reply == QMessageBox.StandardButton.Discard:
-            return True
-        return False
 
     def _show_status(self, message: str, timeout: int = 3000) -> None:
         window = self.window()

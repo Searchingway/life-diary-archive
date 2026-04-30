@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .autosave import AutoSaveMixin
 from .exporters import DiaryExportItem, DiaryExporter
 from .exchange import ExchangePackageExporter
 from .footprint_storage import FootprintStorage
@@ -83,7 +84,7 @@ class ExportRangeDialog(QDialog):
         super().accept()
 
 
-class DiaryPage(QWidget):
+class DiaryPage(AutoSaveMixin, QWidget):
     dirty_state_changed = Signal(bool)
     show_footprints_requested = Signal(str)
 
@@ -103,6 +104,7 @@ class DiaryPage(QWidget):
         self._is_loading_form = False
         self._is_loading_image_details = False
         self._build_ui()
+        self._init_auto_save()
         self.refresh_list()
         if self.entry_list.count() > 0:
             self.entry_list.setCurrentRow(0)
@@ -113,7 +115,7 @@ class DiaryPage(QWidget):
         return self.is_dirty
 
     def maybe_finish_pending_changes(self) -> bool:
-        return self._maybe_keep_changes()
+        return AutoSaveMixin.maybe_finish_pending_changes(self)
 
     def open_first_entry_for_date(self, target_date: str) -> bool | None:
         items = self.storage.list_entries_by_date(target_date)
@@ -342,18 +344,19 @@ class DiaryPage(QWidget):
         self.entry_list.blockSignals(False)
         self._show_status("已创建新的日记草稿。", 3000)
 
-    def save_entry(self) -> None:
+    def save_entry(self) -> bool:
         entry = self._read_form()
         try:
             saved = self.storage.save_entry(entry, self.image_items)
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", f"保存日记时出错：\n{exc}")
-            return
+            return False
 
         self.current_entry = saved
         self.refresh_list(select_id=saved.id)
         self._fill_form(saved)
         self._show_status("已保存到本地。", 3000)
+        return True
 
     def add_images(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(
@@ -563,6 +566,7 @@ class DiaryPage(QWidget):
     def reload_current_entry(self) -> None:
         if self.current_entry is None:
             return
+        self._suspend_auto_save()
         if self.is_dirty:
             reply = QMessageBox.question(
                 self,
@@ -572,17 +576,20 @@ class DiaryPage(QWidget):
                 QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
+                self._resume_auto_save()
                 return
         if self.current_entry.id and self.storage.entry_dir(self.current_entry.id).exists():
             try:
                 entry = self.storage.load_entry(self.current_entry.id)
             except Exception as exc:
                 QMessageBox.critical(self, "读取失败", f"恢复已保存内容时出错：\n{exc}")
+                self._resume_auto_save()
                 return
             self.current_entry = entry
             self._fill_form(entry)
             self.refresh_list(select_id=entry.id)
             self._show_status("已恢复到上次保存的内容。", 3000)
+        self._resume_auto_save()
 
     def _fill_form(self, entry: DiaryEntry) -> None:
         self._is_loading_form = True
@@ -738,30 +745,29 @@ class DiaryPage(QWidget):
 
     def _set_dirty(self, is_dirty: bool) -> None:
         if self.is_dirty == is_dirty:
+            if is_dirty:
+                self._on_dirty_state_changed_for_autosave(True)
             return
         self.is_dirty = is_dirty
         self.dirty_state_changed.emit(self.is_dirty)
+        self._on_dirty_state_changed_for_autosave(self.is_dirty)
 
     def _maybe_keep_changes(self) -> bool:
-        if not self.is_dirty:
-            return True
+        return self.maybe_finish_pending_changes()
 
-        reply = QMessageBox.question(
-            self,
-            "未保存更改",
-            "当前日记有未保存内容，是否先保存？",
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save,
+    def _auto_save_now(self) -> bool:
+        return self.save_entry()
+
+    def _auto_save_has_meaningful_content(self) -> bool:
+        if self.current_entry is None:
+            return False
+        if self.storage.entry_dir(self.current_entry.id).exists():
+            return True
+        return bool(
+            self.title_input.text().strip()
+            or self.body_edit.toPlainText().strip()
+            or self.image_items
         )
-
-        if reply == QMessageBox.StandardButton.Save:
-            self.save_entry()
-            return not self.is_dirty
-        if reply == QMessageBox.StandardButton.Discard:
-            return True
-        return False
 
     def _refresh_image_list(self, select_row: int | None = 0) -> None:
         blocker = QSignalBlocker(self.image_list)

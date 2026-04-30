@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .autosave import AutoSaveMixin
 from .book_page import DiaryPickerDialog
 from .lesson_storage import LESSON_CATEGORIES, LESSON_SEVERITIES, LessonStorage
 from .models import LessonEntry, LessonImageDraft, LessonRelatedDiary
@@ -31,7 +32,7 @@ from .storage import DiaryStorage
 from .ui_helpers import make_scroll_area
 
 
-class LessonPage(QWidget):
+class LessonPage(AutoSaveMixin, QWidget):
     dirty_state_changed = Signal(bool)
     open_diary_requested = Signal(str, str)
 
@@ -50,6 +51,7 @@ class LessonPage(QWidget):
         self._is_loading_form = False
         self._is_loading_image_details = False
         self._build_ui()
+        self._init_auto_save()
         self.refresh_lesson_list()
         if self.lesson_list.count() > 0:
             self.lesson_list.setCurrentRow(0)
@@ -60,7 +62,7 @@ class LessonPage(QWidget):
         return self.is_dirty
 
     def maybe_finish_pending_changes(self) -> bool:
-        return self._maybe_keep_changes()
+        return AutoSaveMixin.maybe_finish_pending_changes(self)
 
     def _build_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -298,21 +300,23 @@ class LessonPage(QWidget):
         self.lesson_list.blockSignals(False)
         self._show_status("已创建新的反思草稿。", 3000)
 
-    def save_lesson(self) -> None:
+    def save_lesson(self) -> bool:
         lesson = self._read_form()
         try:
             saved = self.storage.save_lesson(lesson, self.image_items)
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", f"保存反思记录时出错：\n{exc}")
-            return
+            return False
 
         self._fill_form(saved)
         self.refresh_lesson_list(select_id=saved.id)
         self._show_status("已保存反思记录到本地。", 3000)
+        return True
 
     def reload_current_lesson(self) -> None:
         if self.current_lesson is None:
             return
+        self._suspend_auto_save()
         if self.is_dirty:
             reply = QMessageBox.question(
                 self,
@@ -322,16 +326,19 @@ class LessonPage(QWidget):
                 QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
+                self._resume_auto_save()
                 return
         if self.current_lesson.id and self.storage.lesson_dir(self.current_lesson.id).exists():
             try:
                 lesson = self.storage.load_lesson(self.current_lesson.id)
             except Exception as exc:
                 QMessageBox.critical(self, "读取失败", f"恢复已保存内容时出错：\n{exc}")
+                self._resume_auto_save()
                 return
             self._fill_form(lesson)
             self.refresh_lesson_list(select_id=lesson.id)
             self._show_status("已恢复到上次保存的反思内容。", 3000)
+        self._resume_auto_save()
 
     def delete_current_lesson(self) -> None:
         if self.current_lesson is None:
@@ -702,28 +709,38 @@ class LessonPage(QWidget):
 
     def _set_dirty(self, is_dirty: bool) -> None:
         if self.is_dirty == is_dirty:
+            if is_dirty:
+                self._on_dirty_state_changed_for_autosave(True)
             return
         self.is_dirty = is_dirty
         self.dirty_state_changed.emit(self.is_dirty)
+        self._on_dirty_state_changed_for_autosave(self.is_dirty)
 
     def _maybe_keep_changes(self) -> bool:
-        if not self.is_dirty:
+        return self.maybe_finish_pending_changes()
+
+    def _auto_save_now(self) -> bool:
+        return self.save_lesson()
+
+    def _auto_save_has_meaningful_content(self) -> bool:
+        if self.current_lesson is None:
+            return False
+        if self.storage.lesson_dir(self.current_lesson.id).exists():
             return True
-        reply = QMessageBox.question(
-            self,
-            "未保存更改",
-            "当前反思记录有未保存内容，是否先保存？",
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save,
+        return bool(
+            self.title_input.text().strip()
+            or self.tags_input.text().strip()
+            or self.event_edit.toPlainText().strip()
+            or self.judgment_edit.toPlainText().strip()
+            or self.result_edit.toPlainText().strip()
+            or self.mistake_edit.toPlainText().strip()
+            or self.root_cause_edit.toPlainText().strip()
+            or self.cost_edit.toPlainText().strip()
+            or self.next_action_edit.toPlainText().strip()
+            or self.one_sentence_input.text().strip()
+            or self.image_items
+            or self.current_lesson.related_diaries
         )
-        if reply == QMessageBox.StandardButton.Save:
-            self.save_lesson()
-            return not self.is_dirty
-        if reply == QMessageBox.StandardButton.Discard:
-            return True
-        return False
 
     def _show_status(self, message: str, timeout: int = 3000) -> None:
         window = self.window()

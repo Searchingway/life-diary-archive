@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .autosave import AutoSaveMixin
 from .exchange import ExchangePackageExporter
 from .footprint_storage import FootprintStorage
 from .models import FootprintImageDraft, FootprintPlace, FootprintVisit
@@ -29,7 +30,7 @@ from .storage import DiaryStorage
 from .ui_helpers import make_scroll_area
 
 
-class FootprintPage(QWidget):
+class FootprintPage(AutoSaveMixin, QWidget):
     dirty_state_changed = Signal(bool)
     open_diary_requested = Signal(str)
 
@@ -51,6 +52,7 @@ class FootprintPage(QWidget):
         self._is_loading_place_image_details = False
         self._is_loading_visit_image_details = False
         self._build_ui()
+        self._init_auto_save()
         self.refresh_place_list()
         if self.place_list.count() > 0:
             self.place_list.setCurrentRow(0)
@@ -61,7 +63,7 @@ class FootprintPage(QWidget):
         return self.is_dirty
 
     def maybe_finish_pending_changes(self) -> bool:
-        return self._maybe_keep_changes()
+        return AutoSaveMixin.maybe_finish_pending_changes(self)
 
     def open_first_place_for_date(self, target_date: str) -> bool | None:
         matches = self.storage.list_place_visits_by_date(target_date)
@@ -367,7 +369,7 @@ class FootprintPage(QWidget):
         self.place_list.blockSignals(False)
         self._show_status("已创建新的地点足迹草稿。", 3000)
 
-    def save_place(self) -> None:
+    def save_place(self) -> bool:
         if self.current_place is None:
             self.current_place = self.storage.create_empty_place()
 
@@ -379,17 +381,19 @@ class FootprintPage(QWidget):
             )
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", f"保存地点足迹时出错：\n{exc}")
-            return
+            return False
 
         selected_visit_id = self.current_visit_id
         self._fill_place(saved, select_visit_id=selected_visit_id)
         self.refresh_place_list(select_id=saved.id)
         self._show_status("已保存地点足迹到本地。", 3000)
+        return True
 
     def reload_current_place(self) -> None:
         if self.current_place is None:
             return
 
+        self._suspend_auto_save()
         if self.is_dirty:
             reply = QMessageBox.question(
                 self,
@@ -399,6 +403,7 @@ class FootprintPage(QWidget):
                 QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
+                self._resume_auto_save()
                 return
 
         if self.current_place.id and self.storage.footprint_dir(self.current_place.id).exists():
@@ -406,10 +411,12 @@ class FootprintPage(QWidget):
                 place = self.storage.load_place(self.current_place.id)
             except Exception as exc:
                 QMessageBox.critical(self, "读取失败", f"恢复已保存内容时出错：\n{exc}")
+                self._resume_auto_save()
                 return
             self._fill_place(place, select_visit_id=self.current_visit_id)
             self.refresh_place_list(select_id=place.id)
             self._show_status("已恢复到上次保存的地点足迹内容。", 3000)
+        self._resume_auto_save()
 
     def delete_current_place(self) -> None:
         if self.current_place is None:
@@ -1005,30 +1012,31 @@ class FootprintPage(QWidget):
 
     def _set_dirty(self, is_dirty: bool) -> None:
         if self.is_dirty == is_dirty:
+            if is_dirty:
+                self._on_dirty_state_changed_for_autosave(True)
             return
         self.is_dirty = is_dirty
         self.dirty_state_changed.emit(self.is_dirty)
+        self._on_dirty_state_changed_for_autosave(self.is_dirty)
 
     def _maybe_keep_changes(self) -> bool:
-        if not self.is_dirty:
-            return True
+        return self.maybe_finish_pending_changes()
 
-        reply = QMessageBox.question(
-            self,
-            "未保存更改",
-            "当前地点足迹有未保存内容，是否先保存？",
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save,
+    def _auto_save_now(self) -> bool:
+        return self.save_place()
+
+    def _auto_save_has_meaningful_content(self) -> bool:
+        if self.current_place is None:
+            return False
+        if self.storage.footprint_dir(self.current_place.id).exists():
+            return True
+        return bool(
+            self.place_name_input.text().strip()
+            or self.place_summary_edit.toPlainText().strip()
+            or self.place_image_items
+            or any(visit.thought.strip() for visit in self.current_place.visits)
+            or any(items for items in self.visit_image_items.values())
         )
-
-        if reply == QMessageBox.StandardButton.Save:
-            self.save_place()
-            return not self.is_dirty
-        if reply == QMessageBox.StandardButton.Discard:
-            return True
-        return False
 
     def _build_place_list_text(self, place: FootprintPlace) -> str:
         return f"{place.display_title}\n已关联 {len(place.visits)} 个日期"

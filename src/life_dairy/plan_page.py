@@ -19,12 +19,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .autosave import AutoSaveMixin
 from .models import PlanItem
 from .plan_storage import PLAN_TYPE_LABELS, PLAN_TYPE_VALUES, SUBTRACT_MODES, PlanStorage
 from .ui_helpers import make_scroll_area
 
 
-class PlanPage(QWidget):
+class PlanPage(AutoSaveMixin, QWidget):
     dirty_state_changed = Signal(bool)
 
     def __init__(self, storage: PlanStorage, parent: QWidget | None = None):
@@ -34,6 +35,7 @@ class PlanPage(QWidget):
         self.is_dirty = False
         self._is_loading_form = False
         self._build_ui()
+        self._init_auto_save()
         self.refresh_list()
         if self.plan_list.count() > 0:
             self.plan_list.setCurrentRow(0)
@@ -44,7 +46,7 @@ class PlanPage(QWidget):
         return self.is_dirty
 
     def maybe_finish_pending_changes(self) -> bool:
-        return self._maybe_keep_changes()
+        return AutoSaveMixin.maybe_finish_pending_changes(self)
 
     def _build_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -211,20 +213,22 @@ class PlanPage(QWidget):
         self.plan_list.blockSignals(False)
         self._show_status("已创建新的轻计划草稿。", 3000)
 
-    def save_plan(self) -> None:
+    def save_plan(self) -> bool:
         plan = self._read_form()
         try:
             saved = self.storage.save_plan(plan)
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", f"保存轻计划时出错：\n{exc}")
-            return
+            return False
         self._fill_form(saved)
         self.refresh_list(select_id=saved.id)
         self._show_status("已保存轻计划到本地。", 3000)
+        return True
 
     def reload_current_plan(self) -> None:
         if self.current_plan is None:
             return
+        self._suspend_auto_save()
         if self.is_dirty:
             reply = QMessageBox.question(
                 self,
@@ -234,16 +238,19 @@ class PlanPage(QWidget):
                 QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
+                self._resume_auto_save()
                 return
         if self.storage.plan_dir(self.current_plan.id).exists():
             try:
                 plan = self.storage.load_plan(self.current_plan.id)
             except Exception as exc:
                 QMessageBox.critical(self, "读取失败", f"恢复已保存内容时出错：\n{exc}")
+                self._resume_auto_save()
                 return
             self._fill_form(plan)
             self.refresh_list(select_id=plan.id)
             self._show_status("已恢复到上次保存的轻计划内容。", 3000)
+        self._resume_auto_save()
 
     def delete_current_plan(self) -> None:
         if self.current_plan is None:
@@ -391,28 +398,33 @@ class PlanPage(QWidget):
 
     def _set_dirty(self, is_dirty: bool) -> None:
         if self.is_dirty == is_dirty:
+            if is_dirty:
+                self._on_dirty_state_changed_for_autosave(True)
             return
         self.is_dirty = is_dirty
         self.dirty_state_changed.emit(self.is_dirty)
+        self._on_dirty_state_changed_for_autosave(self.is_dirty)
 
     def _maybe_keep_changes(self) -> bool:
-        if not self.is_dirty:
+        return self.maybe_finish_pending_changes()
+
+    def _auto_save_now(self) -> bool:
+        return self.save_plan()
+
+    def _auto_save_has_meaningful_content(self) -> bool:
+        if self.current_plan is None:
+            return False
+        if self.storage.plan_dir(self.current_plan.id).exists():
             return True
-        reply = QMessageBox.question(
-            self,
-            "未保存更改",
-            "当前轻计划有未保存内容，是否先保存？",
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save,
+        return bool(
+            self.title_input.text().strip()
+            or self.notes_edit.toPlainText().strip()
+            or self.tags_input.text().strip()
+            or self.trigger_scene_input.text().strip()
+            or self.avoid_behavior_input.text().strip()
+            or self.reason_edit.toPlainText().strip()
+            or self.alternative_action_edit.toPlainText().strip()
         )
-        if reply == QMessageBox.StandardButton.Save:
-            self.save_plan()
-            return not self.is_dirty
-        if reply == QMessageBox.StandardButton.Discard:
-            return True
-        return False
 
     def _show_status(self, message: str, timeout: int = 3000) -> None:
         window = self.window()
