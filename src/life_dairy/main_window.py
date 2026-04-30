@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QTabWidget
 
+from .backup_service import APP_VERSION, create_backup, restore_backup, validate_backup
 from .book_page import BookPage
 from .book_storage import BookStorage
 from .diary_page import DiaryPage
@@ -74,6 +75,8 @@ class DiaryMainWindow(QMainWindow):
         self.book_page.open_diary_requested.connect(self._open_diary_from_book)
         self.lesson_page.open_diary_requested.connect(self._open_diary_from_lesson)
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.overview_page.backup_requested.connect(self._backup_data)
+        self.overview_page.restore_requested.connect(self._restore_data)
 
         self.statusBar().showMessage(f"数据目录：{self.diary_storage.root_dir}", 6000)
         self._update_tab_titles()
@@ -121,6 +124,150 @@ class DiaryMainWindow(QMainWindow):
         self.tabs.setTabText(3, book_title)
         self.tabs.setTabText(4, plan_title)
         self.tabs.setTabText(5, lesson_title)
+
+    def _backup_data(self) -> None:
+        if not self._finish_all_pending_changes():
+            return
+        output_dir = QFileDialog.getExistingDirectory(
+            self,
+            "选择备份文件保存位置",
+            str((self.diary_storage.root_dir.parent / "backups").resolve()),
+        )
+        if not output_dir:
+            return
+        try:
+            backup_path = create_backup(self.diary_storage.root_dir, output_dir, APP_VERSION)
+        except Exception as exc:
+            QMessageBox.critical(self, "备份失败", f"备份数据时出错：\n{exc}")
+            return
+        QMessageBox.information(self, "备份完成", f"备份文件已生成：\n\n{backup_path}")
+        self.statusBar().showMessage("数据备份完成。", 5000)
+
+    def _restore_data(self) -> None:
+        if not self._finish_all_pending_changes():
+            return
+        zip_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择备份包",
+            str((self.diary_storage.root_dir.parent / "backups").resolve()),
+            "Zip Backup (*.zip)",
+        )
+        if not zip_path:
+            return
+
+        valid, message = validate_backup(zip_path)
+        if not valid:
+            QMessageBox.warning(self, "备份包无效", message)
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "恢复确认",
+            "恢复会用备份包中的 Diary/ 替换当前数据。恢复前会自动备份当前数据，是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            safety_backup_path = restore_backup(
+                zip_path,
+                self.diary_storage.root_dir,
+                self.diary_storage.root_dir.parent / "backups",
+                APP_VERSION,
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "恢复失败", f"恢复备份时出错：\n{exc}")
+            return
+
+        self._reload_data_after_restore()
+        QMessageBox.information(
+            self,
+            "恢复完成",
+            "恢复完成，已自动备份恢复前的数据：\n\n"
+            f"{safety_backup_path}",
+        )
+        self.statusBar().showMessage("备份恢复完成。", 5000)
+
+    def _finish_all_pending_changes(self) -> bool:
+        pages = [self.tabs.currentWidget()]
+        for page in (self.diary_page, self.footprint_page, self.book_page, self.plan_page, self.lesson_page):
+            if page not in pages:
+                pages.append(page)
+        for page in pages:
+            if hasattr(page, "maybe_finish_pending_changes") and not page.maybe_finish_pending_changes():
+                return False
+        return True
+
+    def _reload_data_after_restore(self) -> None:
+        root_dir = self.diary_storage.root_dir
+        self.diary_storage = DiaryStorage(root_dir)
+        self.footprint_storage = FootprintStorage(root_dir)
+        self.book_storage = BookStorage(root_dir)
+        self.plan_storage = PlanStorage(root_dir)
+        self.lesson_storage = LessonStorage(root_dir)
+
+        self.diary_page.storage = self.diary_storage
+        self.diary_page.footprint_storage = self.footprint_storage
+        self.footprint_page.storage = self.footprint_storage
+        self.footprint_page.diary_storage = self.diary_storage
+        self.book_page.storage = self.book_storage
+        self.book_page.diary_storage = self.diary_storage
+        self.plan_page.storage = self.plan_storage
+        self.lesson_page.storage = self.lesson_storage
+        self.lesson_page.diary_storage = self.diary_storage
+        self.overview_page.service = OverviewService(
+            self.diary_storage,
+            self.footprint_storage,
+            self.book_storage,
+            self.plan_storage,
+            self.lesson_storage,
+        )
+
+        self._reset_page_after_restore(self.diary_page, "current_entry", "image_items", "refresh_list", "entry_list", "new_entry")
+        self._reset_page_after_restore(
+            self.footprint_page,
+            "current_place",
+            "place_image_items",
+            "refresh_place_list",
+            "place_list",
+            "new_place",
+            extra_resets=[("current_visit_id", None), ("visit_image_items", {})],
+        )
+        self._reset_page_after_restore(self.book_page, "current_book", "image_items", "refresh_book_list", "book_list", "new_book")
+        self._reset_page_after_restore(self.plan_page, "current_plan", None, "refresh_list", "plan_list", "new_plan")
+        self._reset_page_after_restore(self.lesson_page, "current_lesson", "image_items", "refresh_lesson_list", "lesson_list", "new_lesson")
+        self.overview_page.refresh_overview()
+        self._update_tab_titles()
+
+    def _reset_page_after_restore(
+        self,
+        page,
+        current_attr: str,
+        image_attr: str | None,
+        refresh_method: str,
+        list_attr: str,
+        new_method: str,
+        extra_resets: list[tuple[str, object]] | None = None,
+    ) -> None:
+        if hasattr(page, "_suspend_auto_save"):
+            page._suspend_auto_save()
+        setattr(page, current_attr, None)
+        if image_attr:
+            setattr(page, image_attr, [])
+        for attr, value in extra_resets or []:
+            setattr(page, attr, value)
+        if hasattr(page, "_set_dirty"):
+            page._set_dirty(False)
+        getattr(page, refresh_method)()
+        list_widget = getattr(page, list_attr)
+        if list_widget.count() > 0:
+            list_widget.setCurrentRow(0)
+        else:
+            getattr(page, new_method)()
+        if hasattr(page, "_resume_auto_save"):
+            page._resume_auto_save()
 
     def _apply_style(self) -> None:
         self.setStyleSheet(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
@@ -18,6 +18,9 @@ from .ui_helpers import make_scroll_area
 
 
 class OverviewPage(QWidget):
+    backup_requested = Signal()
+    restore_requested = Signal()
+
     def __init__(self, service: OverviewService, parent: QWidget | None = None):
         super().__init__(parent)
         self.service = service
@@ -39,8 +42,14 @@ class OverviewPage(QWidget):
         title.setStyleSheet("font-size: 20px; font-weight: 700;")
         self.refresh_button = QPushButton("刷新总览", content)
         self.refresh_button.clicked.connect(self.refresh_overview)
+        self.backup_button = QPushButton("备份数据", content)
+        self.backup_button.clicked.connect(self.backup_requested.emit)
+        self.restore_button = QPushButton("恢复备份", content)
+        self.restore_button.clicked.connect(self.restore_requested.emit)
         header_row.addWidget(title)
         header_row.addStretch(1)
+        header_row.addWidget(self.backup_button)
+        header_row.addWidget(self.restore_button)
         header_row.addWidget(self.refresh_button)
 
         layout.addLayout(header_row)
