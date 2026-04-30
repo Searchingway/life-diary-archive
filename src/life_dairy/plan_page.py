@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -19,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from .models import PlanItem
-from .plan_storage import PlanStorage
+from .plan_storage import PLAN_TYPE_LABELS, PLAN_TYPE_VALUES, SUBTRACT_MODES, PlanStorage
 from .ui_helpers import make_scroll_area
 
 
@@ -64,8 +65,12 @@ class PlanPage(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
 
         self.search_input = QLineEdit(widget)
-        self.search_input.setPlaceholderText("搜索标题 / 日期 / 状态 / 备注")
+        self.search_input.setPlaceholderText("搜索标题 / 备注 / 减法字段 / 标签")
         self.search_input.textChanged.connect(self.refresh_list)
+
+        self.type_filter_combo = QComboBox(widget)
+        self.type_filter_combo.addItems(["全部", "加法计划", "减法计划"])
+        self.type_filter_combo.currentTextChanged.connect(self.refresh_list)
 
         self.new_button = QPushButton("新建计划", widget)
         self.new_button.clicked.connect(self.new_plan)
@@ -77,6 +82,7 @@ class PlanPage(QWidget):
 
         layout.addWidget(title)
         layout.addWidget(self.search_input)
+        layout.addWidget(self.type_filter_combo)
         layout.addWidget(self.new_button)
         layout.addWidget(self.delete_button)
         layout.addWidget(self.plan_list, 1)
@@ -101,6 +107,10 @@ class PlanPage(QWidget):
         action_row.addStretch(1)
 
         form = QFormLayout()
+        self.plan_type_combo = QComboBox(widget)
+        self.plan_type_combo.addItems(["加法计划", "减法计划"])
+        self.plan_type_combo.currentTextChanged.connect(self._on_plan_type_changed)
+
         self.title_input = QLineEdit(widget)
         self.title_input.setPlaceholderText("例如：整理四月照片、周末读完两章")
         self.title_input.textChanged.connect(self._mark_dirty)
@@ -118,10 +128,46 @@ class PlanPage(QWidget):
         self.priority_combo.addItems(["低", "普通", "高"])
         self.priority_combo.currentTextChanged.connect(self._mark_dirty)
 
+        self.tags_input = QLineEdit(widget)
+        self.tags_input.setPlaceholderText("多个标签用逗号分隔")
+        self.tags_input.textChanged.connect(self._mark_dirty)
+
+        form.addRow("计划类型", self.plan_type_combo)
         form.addRow("计划", self.title_input)
         form.addRow("日期", self.due_date_edit)
         form.addRow("状态", self.status_combo)
         form.addRow("优先级", self.priority_combo)
+        form.addRow("标签", self.tags_input)
+
+        self.subtract_group = QGroupBox("减法计划", widget)
+        subtract_layout = QFormLayout(self.subtract_group)
+        self.subtract_mode_combo = QComboBox(self.subtract_group)
+        self.subtract_mode_combo.addItems(SUBTRACT_MODES)
+        self.subtract_mode_combo.currentTextChanged.connect(self._mark_dirty)
+
+        self.trigger_scene_input = QLineEdit(self.subtract_group)
+        self.trigger_scene_input.setPlaceholderText("例如：晚上回宿舍后感到疲惫")
+        self.trigger_scene_input.textChanged.connect(self._mark_dirty)
+
+        self.avoid_behavior_input = QLineEdit(self.subtract_group)
+        self.avoid_behavior_input.setPlaceholderText("例如：连续刷短视频超过30分钟")
+        self.avoid_behavior_input.textChanged.connect(self._mark_dirty)
+
+        self.reason_edit = QTextEdit(self.subtract_group)
+        self.reason_edit.setPlaceholderText("为什么要少做 / 不做这件事")
+        self.reason_edit.setMinimumHeight(90)
+        self.reason_edit.textChanged.connect(self._mark_dirty)
+
+        self.alternative_action_edit = QTextEdit(self.subtract_group)
+        self.alternative_action_edit.setPlaceholderText("触发时用什么行为替代")
+        self.alternative_action_edit.setMinimumHeight(90)
+        self.alternative_action_edit.textChanged.connect(self._mark_dirty)
+
+        subtract_layout.addRow("减法类型", self.subtract_mode_combo)
+        subtract_layout.addRow("触发场景", self.trigger_scene_input)
+        subtract_layout.addRow("我想避免的行为", self.avoid_behavior_input)
+        subtract_layout.addRow("为什么要避免", self.reason_edit)
+        subtract_layout.addRow("替代行为", self.alternative_action_edit)
 
         notes_label = QLabel("备注", widget)
         self.notes_edit = QTextEdit(widget)
@@ -131,6 +177,7 @@ class PlanPage(QWidget):
 
         layout.addLayout(action_row)
         layout.addLayout(form)
+        layout.addWidget(self.subtract_group)
         layout.addWidget(notes_label)
         layout.addWidget(self.notes_edit, 1)
         return widget
@@ -143,7 +190,7 @@ class PlanPage(QWidget):
         blocker = QSignalBlocker(self.plan_list)
         self.plan_list.clear()
         target_row = -1
-        for row, plan in enumerate(self.storage.list_plans(self.search_input.text())):
+        for row, plan in enumerate(self.storage.list_plans(self.search_input.text(), self._current_filter_value())):
             item = QListWidgetItem(self._build_plan_list_text(plan))
             item.setData(Qt.ItemDataRole.UserRole, plan.id)
             item.setToolTip(plan.notes[:150] or plan.display_title)
@@ -246,11 +293,19 @@ class PlanPage(QWidget):
         self.current_plan = plan
         try:
             self.title_input.setText(plan.title)
+            self.plan_type_combo.setCurrentText(PLAN_TYPE_LABELS.get(plan.plan_type, "加法计划"))
             date_value = QDate.fromString(plan.due_date, "yyyy-MM-dd")
             self.due_date_edit.setDate(date_value if date_value.isValid() else QDate.currentDate())
             self.status_combo.setCurrentText(plan.status if plan.status in ["未开始", "进行中", "已完成", "搁置"] else "未开始")
             self.priority_combo.setCurrentText(plan.priority if plan.priority in ["低", "普通", "高"] else "普通")
+            self.tags_input.setText(", ".join(plan.tags))
+            self.subtract_mode_combo.setCurrentText(plan.subtract_mode if plan.subtract_mode in SUBTRACT_MODES else "少做")
+            self.trigger_scene_input.setText(plan.trigger_scene)
+            self.avoid_behavior_input.setText(plan.avoid_behavior)
+            self.reason_edit.setPlainText(plan.reason)
+            self.alternative_action_edit.setPlainText(plan.alternative_action)
             self.notes_edit.setPlainText(plan.notes)
+            self._refresh_subtract_fields()
             self._set_dirty(False)
         finally:
             self._is_loading_form = False
@@ -262,6 +317,17 @@ class PlanPage(QWidget):
         self.current_plan.due_date = self.due_date_edit.date().toString("yyyy-MM-dd")
         self.current_plan.status = self.status_combo.currentText().strip() or "未开始"
         self.current_plan.priority = self.priority_combo.currentText().strip() or "普通"
+        self.current_plan.tags = [
+            item.strip()
+            for item in self.tags_input.text().replace("，", ",").split(",")
+            if item.strip()
+        ]
+        self.current_plan.plan_type = PLAN_TYPE_VALUES.get(self.plan_type_combo.currentText(), "add")
+        self.current_plan.subtract_mode = self.subtract_mode_combo.currentText().strip()
+        self.current_plan.trigger_scene = self.trigger_scene_input.text().strip()
+        self.current_plan.avoid_behavior = self.avoid_behavior_input.text().strip()
+        self.current_plan.reason = self.reason_edit.toPlainText()
+        self.current_plan.alternative_action = self.alternative_action_edit.toPlainText()
         self.current_plan.notes = self.notes_edit.toPlainText()
         return self.current_plan
 
@@ -295,7 +361,28 @@ class PlanPage(QWidget):
         self._show_status(status_message, 3000)
 
     def _build_plan_list_text(self, plan: PlanItem) -> str:
-        return f"{plan.display_title}\n{plan.due_date} | {plan.status} | {plan.priority}"
+        prefix = "【减法】" if plan.plan_type == "subtract" else "【加法】"
+        subtitle_parts = [plan.due_date, plan.status, plan.priority]
+        if plan.plan_type == "subtract" and plan.subtract_mode:
+            subtitle_parts.append(plan.subtract_mode)
+        return f"{prefix}{plan.display_title}\n{' | '.join(subtitle_parts)}"
+
+    def _current_filter_value(self) -> str:
+        if not hasattr(self, "type_filter_combo"):
+            return "all"
+        return {
+            "加法计划": "add",
+            "减法计划": "subtract",
+        }.get(self.type_filter_combo.currentText(), "all")
+
+    def _on_plan_type_changed(self, *_args) -> None:
+        self._refresh_subtract_fields()
+        self._mark_dirty()
+
+    def _refresh_subtract_fields(self) -> None:
+        if not hasattr(self, "subtract_group"):
+            return
+        self.subtract_group.setVisible(self.plan_type_combo.currentText() == "减法计划")
 
     def _mark_dirty(self, *_args) -> None:
         if self._is_loading_form:

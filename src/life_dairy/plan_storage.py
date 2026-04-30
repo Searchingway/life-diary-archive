@@ -8,6 +8,17 @@ from uuid import uuid4
 from .models import PlanItem, now_iso
 
 
+PLAN_TYPE_LABELS = {
+    "add": "加法计划",
+    "subtract": "减法计划",
+}
+PLAN_TYPE_VALUES = {
+    "加法计划": "add",
+    "减法计划": "subtract",
+}
+SUBTRACT_MODES = ["少做", "不做", "暂停", "戒断"]
+
+
 class PlanStorage:
     def __init__(self, root_dir: Path | str):
         self.root_dir = Path(root_dir)
@@ -23,6 +34,13 @@ class PlanStorage:
             status="未开始",
             priority="普通",
             notes="",
+            tags=[],
+            plan_type="add",
+            subtract_mode="",
+            trigger_scene="",
+            avoid_behavior="",
+            reason="",
+            alternative_action="",
             created_at=timestamp,
             updated_at=timestamp,
         )
@@ -30,7 +48,7 @@ class PlanStorage:
     def plan_dir(self, plan_id: str) -> Path:
         return self.plans_dir / plan_id
 
-    def list_plans(self, query: str = "") -> list[PlanItem]:
+    def list_plans(self, query: str = "", plan_type_filter: str = "all") -> list[PlanItem]:
         keyword = query.strip().lower()
         items: list[PlanItem] = []
         for child in self.plans_dir.iterdir():
@@ -39,6 +57,8 @@ class PlanStorage:
             try:
                 item = self._load_plan_from_directory(child, include_deleted=False)
             except (FileNotFoundError, KeyError, json.JSONDecodeError, OSError, ValueError):
+                continue
+            if plan_type_filter in {"add", "subtract"} and item.plan_type != plan_type_filter:
                 continue
             if keyword and not self._matches_query(item, keyword):
                 continue
@@ -59,6 +79,14 @@ class PlanStorage:
         plan_dir.mkdir(parents=True, exist_ok=True)
 
         plan.updated_at = now_iso()
+        if plan.plan_type not in {"add", "subtract"}:
+            plan.plan_type = "add"
+        if plan.plan_type == "add":
+            plan.subtract_mode = ""
+            plan.trigger_scene = ""
+            plan.avoid_behavior = ""
+            plan.reason = ""
+            plan.alternative_action = ""
         with (plan_dir / "plan.json").open("w", encoding="utf-8") as file:
             json.dump(plan.to_dict(), file, ensure_ascii=False, indent=2)
         return self.load_plan(plan.id)
@@ -94,5 +122,12 @@ class PlanStorage:
             plan.status,
             plan.priority,
             plan.notes,
+            " ".join(plan.tags),
+            PLAN_TYPE_LABELS.get(plan.plan_type, "加法计划"),
+            plan.subtract_mode,
+            plan.trigger_scene,
+            plan.avoid_behavior,
+            plan.reason,
+            plan.alternative_action,
         ]
         return any(keyword in text.lower() for text in haystacks if text)

@@ -304,6 +304,132 @@ class BookEntry:
 
 
 @dataclass(slots=True)
+class LessonImage:
+    file_name: str
+    label: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "file_name": self.file_name,
+            "label": self.label,
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "LessonImage":
+        if isinstance(value, str):
+            return cls(file_name=value, label="")
+        if isinstance(value, dict):
+            return cls(
+                file_name=str(value.get("file_name", "")),
+                label=str(value.get("label", "")),
+            )
+        raise ValueError("invalid lesson image metadata")
+
+
+@dataclass(slots=True)
+class LessonImageDraft:
+    source_path: Path
+    label: str = ""
+
+
+@dataclass(slots=True)
+class LessonRelatedDiary:
+    entry_id: str
+    date: str
+    title: str
+
+    @property
+    def display_title(self) -> str:
+        title = self.title.strip() or "无标题日记"
+        return f"{self.date} | {title}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entry_id": self.entry_id,
+            "date": self.date,
+            "title": self.title,
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "LessonRelatedDiary":
+        if isinstance(value, dict):
+            return cls(
+                entry_id=str(value.get("entry_id", "")),
+                date=str(value.get("date", "")),
+                title=str(value.get("title", "")),
+            )
+        raise ValueError("invalid lesson related diary metadata")
+
+
+@dataclass(slots=True)
+class LessonEntry:
+    id: str
+    title: str
+    date: str
+    category: str
+    severity: str
+    tags: list[str]
+    event: str
+    judgment: str
+    result: str
+    mistake: str
+    root_cause: str
+    cost: str
+    next_action: str
+    one_sentence: str
+    created_at: str
+    updated_at: str
+    images: list[LessonImage] = field(default_factory=list)
+    related_diaries: list[LessonRelatedDiary] = field(default_factory=list)
+
+    @property
+    def display_title(self) -> str:
+        return self.title.strip() or "未命名反思"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "lesson_id": self.id,
+            "title": self.title,
+            "date": self.date,
+            "category": self.category,
+            "severity": self.severity,
+            "tags": self.tags,
+            "images": [item.to_dict() for item in self.images],
+            "related_entries": [item.to_dict() for item in self.related_diaries],
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "deleted": False,
+            "content_file": "content.md",
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], sections: dict[str, str]) -> "LessonEntry":
+        raw_tags = data.get("tags", [])
+        tags = [str(item).strip() for item in raw_tags if str(item).strip()]
+        lesson_id = str(data.get("lesson_id") or data.get("id"))
+        return cls(
+            id=lesson_id,
+            title=str(data.get("title", "")),
+            date=str(data.get("date", "")),
+            category=str(data.get("category", "其他")),
+            severity=str(data.get("severity", "中等")),
+            tags=tags,
+            event=sections.get("事件经过", ""),
+            judgment=sections.get("当时我是怎么判断的", ""),
+            result=sections.get("结果是什么", ""),
+            mistake=sections.get("我哪里判断错了", ""),
+            root_cause=sections.get("真正的问题是什么", ""),
+            cost=sections.get("这次的代价", ""),
+            next_action=sections.get("下次遇到类似情况要怎么做", ""),
+            one_sentence=sections.get("一句话教训", ""),
+            created_at=str(data.get("created_at", now_iso())),
+            updated_at=str(data.get("updated_at", now_iso())),
+            images=[LessonImage.from_value(item) for item in data.get("images", [])],
+            related_diaries=[LessonRelatedDiary.from_value(item) for item in data.get("related_entries", [])],
+        )
+
+
+@dataclass(slots=True)
 class PlanItem:
     id: str
     title: str
@@ -311,6 +437,13 @@ class PlanItem:
     status: str
     priority: str
     notes: str
+    tags: list[str]
+    plan_type: str
+    subtract_mode: str
+    trigger_scene: str
+    avoid_behavior: str
+    reason: str
+    alternative_action: str
     created_at: str
     updated_at: str
 
@@ -326,12 +459,26 @@ class PlanItem:
             "status": self.status,
             "priority": self.priority,
             "notes": self.notes,
+            "tags": self.tags,
+            "plan_type": self.plan_type,
+            "subtract_mode": self.subtract_mode,
+            "trigger_scene": self.trigger_scene,
+            "avoid_behavior": self.avoid_behavior,
+            "reason": self.reason,
+            "alternative_action": self.alternative_action,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PlanItem":
+        raw_tags = data.get("tags", [])
+        if isinstance(raw_tags, str):
+            raw_tags = raw_tags.replace("，", ",").split(",")
+        tags = [str(item).strip() for item in raw_tags if str(item).strip()]
+        plan_type = str(data.get("plan_type", "add"))
+        if plan_type not in {"add", "subtract"}:
+            plan_type = "add"
         return cls(
             id=str(data["id"]),
             title=str(data.get("title", "")),
@@ -339,6 +486,13 @@ class PlanItem:
             status=str(data.get("status", "未开始")),
             priority=str(data.get("priority", "普通")),
             notes=str(data.get("notes", "")),
+            tags=tags,
+            plan_type=plan_type,
+            subtract_mode=str(data.get("subtract_mode", "")),
+            trigger_scene=str(data.get("trigger_scene", "")),
+            avoid_behavior=str(data.get("avoid_behavior", "")),
+            reason=str(data.get("reason", "")),
+            alternative_action=str(data.get("alternative_action", "")),
             created_at=str(data.get("created_at", now_iso())),
             updated_at=str(data.get("updated_at", now_iso())),
         )

@@ -7,6 +7,8 @@ from .book_storage import BookStorage
 from .diary_page import DiaryPage
 from .footprint_page import FootprintPage
 from .footprint_storage import FootprintStorage
+from .lesson_page import LessonPage
+from .lesson_storage import LessonStorage
 from .plan_page import PlanPage
 from .plan_storage import PlanStorage
 from .storage import DiaryStorage
@@ -19,16 +21,18 @@ class DiaryMainWindow(QMainWindow):
         footprint_storage: FootprintStorage,
         book_storage: BookStorage,
         plan_storage: PlanStorage,
+        lesson_storage: LessonStorage | None = None,
     ):
         super().__init__()
         self.diary_storage = diary_storage
         self.footprint_storage = footprint_storage
         self.book_storage = book_storage
         self.plan_storage = plan_storage
+        self.lesson_storage = lesson_storage or LessonStorage(diary_storage.root_dir)
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("人生档案 Diary - 日记、足迹与读书")
+        self.setWindowTitle("人生档案 Diary - 日记、足迹、读书与反思")
         self.resize(1260, 840)
 
         self.tabs = QTabWidget(self)
@@ -36,11 +40,13 @@ class DiaryMainWindow(QMainWindow):
         self.footprint_page = FootprintPage(self.footprint_storage, self.diary_storage, self.tabs)
         self.book_page = BookPage(self.book_storage, self.diary_storage, self.tabs)
         self.plan_page = PlanPage(self.plan_storage, self.tabs)
+        self.lesson_page = LessonPage(self.lesson_storage, self.diary_storage, self.tabs)
 
         self.tabs.addTab(self.diary_page, "日记")
         self.tabs.addTab(self.footprint_page, "足迹")
         self.tabs.addTab(self.book_page, "读书")
         self.tabs.addTab(self.plan_page, "轻计划")
+        self.tabs.addTab(self.lesson_page, "教训与反思")
         self.setCentralWidget(self.tabs)
         self._apply_style()
 
@@ -48,16 +54,18 @@ class DiaryMainWindow(QMainWindow):
         self.footprint_page.dirty_state_changed.connect(self._update_tab_titles)
         self.book_page.dirty_state_changed.connect(self._update_tab_titles)
         self.plan_page.dirty_state_changed.connect(self._update_tab_titles)
+        self.lesson_page.dirty_state_changed.connect(self._update_tab_titles)
         self.diary_page.show_footprints_requested.connect(self._open_footprints_for_date)
         self.footprint_page.open_diary_requested.connect(self._open_diary_for_date)
         self.book_page.open_diary_requested.connect(self._open_diary_from_book)
+        self.lesson_page.open_diary_requested.connect(self._open_diary_from_lesson)
 
         self.statusBar().showMessage(f"数据目录：{self.diary_storage.root_dir}", 6000)
         self._update_tab_titles()
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         pages = [self.tabs.currentWidget()]
-        for page in (self.diary_page, self.footprint_page, self.book_page, self.plan_page):
+        for page in (self.diary_page, self.footprint_page, self.book_page, self.plan_page, self.lesson_page):
             if page not in pages:
                 pages.append(page)
 
@@ -73,10 +81,12 @@ class DiaryMainWindow(QMainWindow):
         footprint_title = "足迹 *" if self.footprint_page.has_unsaved_changes() else "足迹"
         book_title = "读书 *" if self.book_page.has_unsaved_changes() else "读书"
         plan_title = "轻计划 *" if self.plan_page.has_unsaved_changes() else "轻计划"
+        lesson_title = "教训与反思 *" if self.lesson_page.has_unsaved_changes() else "教训与反思"
         self.tabs.setTabText(0, diary_title)
         self.tabs.setTabText(1, footprint_title)
         self.tabs.setTabText(2, book_title)
         self.tabs.setTabText(3, plan_title)
+        self.tabs.setTabText(4, lesson_title)
 
     def _apply_style(self) -> None:
         self.setStyleSheet(
@@ -168,6 +178,12 @@ class DiaryMainWindow(QMainWindow):
             QMessageBox.information(self, "当天没有日记", f"{target_date} 还没有日记。")
 
     def _open_diary_from_book(self, entry_id: str, target_date: str) -> None:
+        self._open_diary_from_relation(entry_id, target_date)
+
+    def _open_diary_from_lesson(self, entry_id: str, target_date: str) -> None:
+        self._open_diary_from_relation(entry_id, target_date)
+
+    def _open_diary_from_relation(self, entry_id: str, target_date: str) -> None:
         if entry_id:
             result = self.diary_page.open_entry_by_id(entry_id)
             if result is True:

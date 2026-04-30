@@ -16,9 +16,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from life_dairy.footprint_storage import FootprintStorage
+from life_dairy.lesson_storage import LessonStorage
 from life_dairy.main_window import DiaryMainWindow
 from life_dairy.book_storage import BookStorage
-from life_dairy.models import BookRelatedDiary
+from life_dairy.models import BookRelatedDiary, LessonRelatedDiary
 from life_dairy.plan_storage import PlanStorage
 from life_dairy.storage import DiaryStorage
 
@@ -35,23 +36,26 @@ class DiaryMainWindowTests(unittest.TestCase):
         self.footprint_storage = FootprintStorage(self.case_dir)
         self.book_storage = BookStorage(self.case_dir)
         self.plan_storage = PlanStorage(self.case_dir)
+        self.lesson_storage = LessonStorage(self.case_dir)
         self.window = DiaryMainWindow(
             self.diary_storage,
             self.footprint_storage,
             self.book_storage,
             self.plan_storage,
+            self.lesson_storage,
         )
 
     def tearDown(self) -> None:
         self.window.close()
         shutil.rmtree(self.case_dir, ignore_errors=True)
 
-    def test_main_window_has_diary_and_footprint_tabs(self) -> None:
-        self.assertEqual(4, self.window.tabs.count())
+    def test_main_window_has_desktop_tabs(self) -> None:
+        self.assertEqual(5, self.window.tabs.count())
         self.assertEqual("日记", self.window.tabs.tabText(0))
         self.assertEqual("足迹", self.window.tabs.tabText(1))
         self.assertEqual("读书", self.window.tabs.tabText(2))
         self.assertEqual("轻计划", self.window.tabs.tabText(3))
+        self.assertEqual("教训与反思", self.window.tabs.tabText(4))
 
     def test_cross_navigation_switches_between_diary_and_footprint(self) -> None:
         diary = self.diary_storage.create_empty_entry()
@@ -129,6 +133,33 @@ class DiaryMainWindowTests(unittest.TestCase):
         relation = self.window.book_page._current_related_diary()
 
         self.window._open_diary_from_book(relation.entry_id, relation.date)
+
+        self.assertIs(self.window.tabs.currentWidget(), self.window.diary_page)
+        self.assertEqual(saved_diary.id, self.window.diary_page.current_entry.id)
+
+    def test_lesson_page_can_open_related_diary(self) -> None:
+        diary = self.diary_storage.create_empty_entry()
+        diary.date = "2026-04-30"
+        diary.title = "接单复盘"
+        saved_diary = self.diary_storage.save_entry(diary)
+
+        lesson = self.lesson_storage.create_empty_lesson()
+        lesson.title = "报价边界反思"
+        lesson.related_diaries.append(
+            LessonRelatedDiary(
+                entry_id=saved_diary.id,
+                date=saved_diary.date,
+                title=saved_diary.display_title,
+            ),
+        )
+        saved_lesson = self.lesson_storage.save_lesson(lesson)
+
+        self.window.lesson_page.refresh_lesson_list(select_id=saved_lesson.id)
+        self.window.lesson_page._open_lesson_by_id(saved_lesson.id)
+        self.window.lesson_page.related_list.setCurrentRow(0)
+        relation = self.window.lesson_page._current_related_diary()
+
+        self.window._open_diary_from_lesson(relation.entry_id, relation.date)
 
         self.assertIs(self.window.tabs.currentWidget(), self.window.diary_page)
         self.assertEqual(saved_diary.id, self.window.diary_page.current_entry.id)
