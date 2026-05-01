@@ -21,6 +21,7 @@ from life_dairy.main_window import DiaryMainWindow
 from life_dairy.book_storage import BookStorage
 from life_dairy.models import BookRelatedDiary, LessonRelatedDiary
 from life_dairy.plan_storage import PlanStorage
+from life_dairy.self_analysis_storage import SelfAnalysisStorage
 from life_dairy.storage import DiaryStorage
 
 
@@ -37,12 +38,14 @@ class DiaryMainWindowTests(unittest.TestCase):
         self.book_storage = BookStorage(self.case_dir)
         self.plan_storage = PlanStorage(self.case_dir)
         self.lesson_storage = LessonStorage(self.case_dir)
+        self.self_analysis_storage = SelfAnalysisStorage(self.case_dir)
         self.window = DiaryMainWindow(
             self.diary_storage,
             self.footprint_storage,
             self.book_storage,
             self.plan_storage,
             self.lesson_storage,
+            self.self_analysis_storage,
         )
 
     def tearDown(self) -> None:
@@ -50,13 +53,14 @@ class DiaryMainWindowTests(unittest.TestCase):
         shutil.rmtree(self.case_dir, ignore_errors=True)
 
     def test_main_window_has_desktop_tabs(self) -> None:
-        self.assertEqual(6, self.window.tabs.count())
+        self.assertEqual(7, self.window.tabs.count())
         self.assertEqual("总览", self.window.tabs.tabText(0))
         self.assertEqual("日记", self.window.tabs.tabText(1))
         self.assertEqual("足迹", self.window.tabs.tabText(2))
         self.assertEqual("读书", self.window.tabs.tabText(3))
         self.assertEqual("轻计划", self.window.tabs.tabText(4))
         self.assertEqual("教训与反思", self.window.tabs.tabText(5))
+        self.assertEqual("自我分析", self.window.tabs.tabText(6))
         self.assertIsNotNone(self.window.overview_page)
 
     def test_cross_navigation_switches_between_diary_and_footprint(self) -> None:
@@ -165,6 +169,24 @@ class DiaryMainWindowTests(unittest.TestCase):
 
         self.assertIs(self.window.tabs.currentWidget(), self.window.diary_page)
         self.assertEqual(saved_diary.id, self.window.diary_page.current_entry.id)
+
+    def test_self_analysis_page_can_open_related_diary_and_lesson(self) -> None:
+        diary = self.diary_storage.create_empty_entry()
+        diary.date = "2026-05-01"
+        diary.title = "自我分析关联日记"
+        saved_diary = self.diary_storage.save_entry(diary)
+
+        lesson = self.lesson_storage.create_empty_lesson()
+        lesson.title = "接单边界教训"
+        saved_lesson = self.lesson_storage.save_lesson(lesson)
+
+        self.window._open_diary_from_self_analysis(saved_diary.id, saved_diary.date)
+        self.assertIs(self.window.tabs.currentWidget(), self.window.diary_page)
+        self.assertEqual(saved_diary.id, self.window.diary_page.current_entry.id)
+
+        self.window._open_lesson_from_self_analysis(saved_lesson.id)
+        self.assertIs(self.window.tabs.currentWidget(), self.window.lesson_page)
+        self.assertEqual(saved_lesson.id, self.window.lesson_page.current_lesson.id)
 
 
 if __name__ == "__main__":

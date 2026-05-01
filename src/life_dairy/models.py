@@ -430,6 +430,175 @@ class LessonEntry:
 
 
 @dataclass(slots=True)
+class SelfAnalysisImage:
+    file_name: str
+    label: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "file_name": self.file_name,
+            "label": self.label,
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "SelfAnalysisImage":
+        if isinstance(value, str):
+            return cls(file_name=value, label="")
+        if isinstance(value, dict):
+            return cls(
+                file_name=str(value.get("file_name", "")),
+                label=str(value.get("label", "")),
+            )
+        raise ValueError("invalid self analysis image metadata")
+
+
+@dataclass(slots=True)
+class SelfAnalysisImageDraft:
+    source_path: Path
+    label: str = ""
+
+
+@dataclass(slots=True)
+class SelfAnalysisRelatedDiary:
+    entry_id: str
+    date: str
+    title: str
+
+    @property
+    def display_title(self) -> str:
+        title = self.title.strip() or "无标题日记"
+        return f"{self.date} | {title}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entry_id": self.entry_id,
+            "date": self.date,
+            "title": self.title,
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "SelfAnalysisRelatedDiary":
+        if isinstance(value, dict):
+            return cls(
+                entry_id=str(value.get("entry_id", "")),
+                date=str(value.get("date", "")),
+                title=str(value.get("title", "")),
+            )
+        raise ValueError("invalid self analysis related diary metadata")
+
+
+@dataclass(slots=True)
+class SelfAnalysisRelatedLesson:
+    lesson_id: str
+    date: str
+    title: str
+
+    @property
+    def display_title(self) -> str:
+        title = self.title.strip() or "未命名反思"
+        return f"{self.date} | {title}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "lesson_id": self.lesson_id,
+            "date": self.date,
+            "title": self.title,
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "SelfAnalysisRelatedLesson":
+        if isinstance(value, dict):
+            return cls(
+                lesson_id=str(value.get("lesson_id", "")),
+                date=str(value.get("date", "")),
+                title=str(value.get("title", "")),
+            )
+        raise ValueError("invalid self analysis related lesson metadata")
+
+
+@dataclass(slots=True)
+class SelfAnalysisEntry:
+    id: str
+    title: str
+    date: str
+    analysis_type: str
+    tags: list[str]
+    trigger_event: str
+    emotion: str
+    body_reaction: str
+    surface_want: str
+    real_fear: str
+    real_want: str
+    repeated_pattern: str
+    imagined_judgment: str
+    defense: str
+    similar_experience: str
+    insight: str
+    next_action: str
+    created_at: str
+    updated_at: str
+    images: list[SelfAnalysisImage] = field(default_factory=list)
+    related_diaries: list[SelfAnalysisRelatedDiary] = field(default_factory=list)
+    related_lessons: list[SelfAnalysisRelatedLesson] = field(default_factory=list)
+
+    @property
+    def display_title(self) -> str:
+        return self.title.strip() or "未命名自我分析"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "analysis_id": self.id,
+            "title": self.title,
+            "date": self.date,
+            "analysis_type": self.analysis_type,
+            "tags": self.tags,
+            "images": [item.to_dict() for item in self.images],
+            "related_entries": [item.to_dict() for item in self.related_diaries],
+            "related_lessons": [item.to_dict() for item in self.related_lessons],
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "deleted": False,
+            "content_file": "content.md",
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], sections: dict[str, str]) -> "SelfAnalysisEntry":
+        raw_tags = data.get("tags", [])
+        tags = [str(item).strip() for item in raw_tags if str(item).strip()]
+        analysis_id = str(data.get("analysis_id") or data.get("id"))
+        return cls(
+            id=analysis_id,
+            title=str(data.get("title", "")),
+            date=str(data.get("date", "")),
+            analysis_type=str(data.get("analysis_type", "其他")),
+            tags=tags,
+            trigger_event=sections.get("触发事件", ""),
+            emotion=sections.get("当时的情绪", ""),
+            body_reaction=sections.get("当时的身体反应", ""),
+            surface_want=sections.get("我表面上想要什么", ""),
+            real_fear=sections.get("我真正害怕什么", ""),
+            real_want=sections.get("我真正想要什么", ""),
+            repeated_pattern=sections.get("我在重复什么模式", ""),
+            imagined_judgment=sections.get("我想象中的别人怎么看我", ""),
+            defense=sections.get("我采取了什么防御方式", ""),
+            similar_experience=sections.get("这件事和过去哪些经历相似", ""),
+            insight=sections.get("我从中看见了什么", ""),
+            next_action=sections.get("下一步我可以怎么做", ""),
+            created_at=str(data.get("created_at", now_iso())),
+            updated_at=str(data.get("updated_at", now_iso())),
+            images=[SelfAnalysisImage.from_value(item) for item in data.get("images", [])],
+            related_diaries=[
+                SelfAnalysisRelatedDiary.from_value(item)
+                for item in data.get("related_entries", [])
+            ],
+            related_lessons=[
+                SelfAnalysisRelatedLesson.from_value(item)
+                for item in data.get("related_lessons", [])
+            ],
+        )
+
+
+@dataclass(slots=True)
 class PlanItem:
     id: str
     title: str

@@ -22,6 +22,7 @@ from life_dairy.lesson_storage import LessonStorage
 from life_dairy.main_window import DiaryMainWindow
 from life_dairy.models import DiaryImageDraft
 from life_dairy.plan_storage import PlanStorage
+from life_dairy.self_analysis_storage import SelfAnalysisStorage
 from life_dairy.storage import DiaryStorage
 
 
@@ -38,12 +39,14 @@ class AutoSaveTests(unittest.TestCase):
         self.book_storage = BookStorage(self.case_dir)
         self.plan_storage = PlanStorage(self.case_dir)
         self.lesson_storage = LessonStorage(self.case_dir)
+        self.self_analysis_storage = SelfAnalysisStorage(self.case_dir)
         self.window = DiaryMainWindow(
             self.diary_storage,
             self.footprint_storage,
             self.book_storage,
             self.plan_storage,
             self.lesson_storage,
+            self.self_analysis_storage,
         )
 
     def tearDown(self) -> None:
@@ -88,6 +91,21 @@ class AutoSaveTests(unittest.TestCase):
         self.assertEqual("自动保存反思", loaded.title)
         self.assertEqual("这次没有忘记保存。", loaded.event)
         self.assertEqual("以后依赖自动保存兜底。", loaded.next_action)
+
+    def test_self_analysis_changes_can_auto_save(self) -> None:
+        page = self.window.self_analysis_page
+        page.title_input.setText("自动保存自我分析")
+        page.type_combo.setCurrentText("学习困境")
+        page.section_edits["trigger_event"].setPlainText("刷题时想跳过错题。")
+        page.section_edits["insight"].setPlainText("卡住的是复盘流程。")
+
+        self.assertTrue(page.perform_auto_save())
+        loaded = self.self_analysis_storage.load_analysis(page.current_analysis.id)
+
+        self.assertEqual("自动保存自我分析", loaded.title)
+        self.assertEqual("学习困境", loaded.analysis_type)
+        self.assertEqual("刷题时想跳过错题。", loaded.trigger_event)
+        self.assertEqual("卡住的是复盘流程。", loaded.insight)
 
     def test_reload_saved_content_does_not_get_auto_saved_back_over_it(self) -> None:
         page = self.window.diary_page

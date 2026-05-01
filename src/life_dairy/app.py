@@ -9,6 +9,7 @@ from .footprint_storage import FootprintStorage
 from .lesson_storage import LessonStorage
 from .main_window import DiaryMainWindow
 from .plan_storage import PlanStorage
+from .self_analysis_storage import SelfAnalysisStorage
 from .storage import DiaryStorage, default_data_dir
 
 
@@ -21,6 +22,7 @@ def main() -> int:
         BookStorage(data_dir),
         PlanStorage(data_dir),
         LessonStorage(data_dir),
+        SelfAnalysisStorage(data_dir),
     )
     window.show()
     return app.exec()
