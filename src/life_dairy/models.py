@@ -599,6 +599,181 @@ class SelfAnalysisEntry:
 
 
 @dataclass(slots=True)
+class WorkImage:
+    file_name: str
+    label: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "file_name": self.file_name,
+            "label": self.label,
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "WorkImage":
+        if isinstance(value, str):
+            return cls(file_name=value, label="")
+        if isinstance(value, dict):
+            return cls(
+                file_name=str(value.get("file_name", "")),
+                label=str(value.get("label", "")),
+            )
+        raise ValueError("invalid work image metadata")
+
+
+@dataclass(slots=True)
+class WorkImageDraft:
+    source_path: Path
+    label: str = ""
+
+
+@dataclass(slots=True)
+class WorkRelatedDiary:
+    entry_id: str
+    date: str
+    title: str
+
+    @property
+    def display_title(self) -> str:
+        title = self.title.strip() or "无标题日记"
+        return f"{self.date} | {title}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entry_id": self.entry_id,
+            "date": self.date,
+            "title": self.title,
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "WorkRelatedDiary":
+        if isinstance(value, dict):
+            return cls(
+                entry_id=str(value.get("entry_id", "")),
+                date=str(value.get("date", "")),
+                title=str(value.get("title", "")),
+            )
+        raise ValueError("invalid work related diary metadata")
+
+
+@dataclass(slots=True)
+class WorkRelatedSelfAnalysis:
+    analysis_id: str
+    date: str
+    title: str
+
+    @property
+    def display_title(self) -> str:
+        title = self.title.strip() or "未命名自我分析"
+        return f"{self.date} | {title}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "analysis_id": self.analysis_id,
+            "date": self.date,
+            "title": self.title,
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "WorkRelatedSelfAnalysis":
+        if isinstance(value, dict):
+            return cls(
+                analysis_id=str(value.get("analysis_id", "")),
+                date=str(value.get("date", "")),
+                title=str(value.get("title", "")),
+            )
+        raise ValueError("invalid work related self analysis metadata")
+
+
+@dataclass(slots=True)
+class WorkEntry:
+    id: str
+    title: str
+    work_type: str
+    creator: str
+    status: str
+    start_date: str
+    finish_date: str
+    rating: str
+    tags: list[str]
+    one_sentence: str
+    summary: str
+    liked: str
+    disliked: str
+    touched: str
+    favorite_parts: str
+    self_connection: str
+    past_connection: str
+    final_review: str
+    created_at: str
+    updated_at: str
+    images: list[WorkImage] = field(default_factory=list)
+    related_diaries: list[WorkRelatedDiary] = field(default_factory=list)
+    related_self_analysis: list[WorkRelatedSelfAnalysis] = field(default_factory=list)
+
+    @property
+    def display_title(self) -> str:
+        return self.title.strip() or "未命名作品"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "work_id": self.id,
+            "title": self.title,
+            "work_type": self.work_type,
+            "creator": self.creator,
+            "status": self.status,
+            "start_date": self.start_date,
+            "finish_date": self.finish_date,
+            "rating": self.rating,
+            "tags": self.tags,
+            "images": [item.to_dict() for item in self.images],
+            "related_entries": [item.to_dict() for item in self.related_diaries],
+            "related_self_analysis": [item.to_dict() for item in self.related_self_analysis],
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "deleted": False,
+            "content_file": "content.md",
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], sections: dict[str, str]) -> "WorkEntry":
+        raw_tags = data.get("tags", [])
+        tags = [str(item).strip() for item in raw_tags if str(item).strip()]
+        work_id = str(data.get("work_id") or data.get("id"))
+        return cls(
+            id=work_id,
+            title=str(data.get("title", "")),
+            work_type=str(data.get("work_type", "其他")),
+            creator=str(data.get("creator", "")),
+            status=str(data.get("status", "想看")),
+            start_date=str(data.get("start_date", "")),
+            finish_date=str(data.get("finish_date", "")),
+            rating=str(data.get("rating", "")),
+            tags=tags,
+            one_sentence=sections.get("一句话印象", ""),
+            summary=sections.get("内容摘要", ""),
+            liked=sections.get("我喜欢的地方", ""),
+            disliked=sections.get("我不喜欢的地方", ""),
+            touched=sections.get("触动我的地方", ""),
+            favorite_parts=sections.get("喜欢的角色 / 场景 / 台词", ""),
+            self_connection=sections.get("让我想到的自己", ""),
+            past_connection=sections.get("和我过去经历的关联", ""),
+            final_review=sections.get("我的最终评价", ""),
+            created_at=str(data.get("created_at", now_iso())),
+            updated_at=str(data.get("updated_at", now_iso())),
+            images=[WorkImage.from_value(item) for item in data.get("images", [])],
+            related_diaries=[
+                WorkRelatedDiary.from_value(item)
+                for item in data.get("related_entries", [])
+            ],
+            related_self_analysis=[
+                WorkRelatedSelfAnalysis.from_value(item)
+                for item in data.get("related_self_analysis", [])
+            ],
+        )
+
+
+@dataclass(slots=True)
 class PlanItem:
     id: str
     title: str

@@ -24,6 +24,7 @@ from life_dairy.models import DiaryImageDraft
 from life_dairy.plan_storage import PlanStorage
 from life_dairy.self_analysis_storage import SelfAnalysisStorage
 from life_dairy.storage import DiaryStorage
+from life_dairy.work_storage import WorkStorage
 
 
 class AutoSaveTests(unittest.TestCase):
@@ -40,6 +41,7 @@ class AutoSaveTests(unittest.TestCase):
         self.plan_storage = PlanStorage(self.case_dir)
         self.lesson_storage = LessonStorage(self.case_dir)
         self.self_analysis_storage = SelfAnalysisStorage(self.case_dir)
+        self.work_storage = WorkStorage(self.case_dir)
         self.window = DiaryMainWindow(
             self.diary_storage,
             self.footprint_storage,
@@ -47,6 +49,7 @@ class AutoSaveTests(unittest.TestCase):
             self.plan_storage,
             self.lesson_storage,
             self.self_analysis_storage,
+            self.work_storage,
         )
 
     def tearDown(self) -> None:
@@ -106,6 +109,26 @@ class AutoSaveTests(unittest.TestCase):
         self.assertEqual("学习困境", loaded.analysis_type)
         self.assertEqual("刷题时想跳过错题。", loaded.trigger_event)
         self.assertEqual("卡住的是复盘流程。", loaded.insight)
+
+    def test_work_changes_can_auto_save_and_manual_save_still_works(self) -> None:
+        page = self.window.work_page
+        page.title_input.setText("自动保存作品感悟")
+        page.type_combo.setCurrentText("电影")
+        page.status_combo.setCurrentText("已完成")
+        page.rating_input.setText("8.5")
+        page.section_edits["one_sentence"].setPlainText("看完后留下了很长的余味。")
+
+        self.assertTrue(page.perform_auto_save())
+        loaded = self.work_storage.load_work(page.current_work.id)
+        self.assertEqual("自动保存作品感悟", loaded.title)
+        self.assertEqual("电影", loaded.work_type)
+        self.assertEqual("已完成", loaded.status)
+        self.assertEqual("看完后留下了很长的余味。", loaded.one_sentence)
+
+        page.section_edits["final_review"].setPlainText("手动保存仍然可用。")
+        self.assertTrue(page.save_work())
+        loaded_again = self.work_storage.load_work(page.current_work.id)
+        self.assertEqual("手动保存仍然可用。", loaded_again.final_review)
 
     def test_reload_saved_content_does_not_get_auto_saved_back_over_it(self) -> None:
         page = self.window.diary_page

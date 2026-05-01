@@ -11,9 +11,9 @@ from pathlib import Path
 from uuid import uuid4
 
 
-APP_VERSION = "2.6"
+APP_VERSION = "2.7"
 BACKUP_TYPE = "LifeDiaryBackup"
-KNOWN_MODULES = ["entries", "footprints", "books", "plans", "lessons", "self_analysis"]
+KNOWN_MODULES = ["entries", "footprints", "books", "plans", "lessons", "self_analysis", "works"]
 
 
 def create_backup(

@@ -11,6 +11,7 @@ from .main_window import DiaryMainWindow
 from .plan_storage import PlanStorage
 from .self_analysis_storage import SelfAnalysisStorage
 from .storage import DiaryStorage, default_data_dir
+from .work_storage import WorkStorage
 
 
 def main() -> int:
@@ -23,6 +24,7 @@ def main() -> int:
         PlanStorage(data_dir),
         LessonStorage(data_dir),
         SelfAnalysisStorage(data_dir),
+        WorkStorage(data_dir),
     )
     window.show()
     return app.exec()
