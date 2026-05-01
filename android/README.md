@@ -1,15 +1,36 @@
 # 人生档案手机版
 
-这是 `android/LifeDiaryMobile` 里的 Qt 6/QML 手机端工程，目标是承接桌面版的本地优先数据结构。当前已经包含：
+这是 `android/LifeDiaryMobile` 里的 Qt 6/QML 手机端工程，目标是承接桌面版的本地优先数据结构。Mobile 1.5 当前已经包含：
 
 - 日记：新建、搜索、编辑、保存、软删除
 - 足迹：地点档案、地点搜索、日期记录、感悟保存、删除
 - 读书：书名、作者、状态、日期、标签、摘要、笔记
 - 轻计划：计划标题、日期、状态、优先级、备注、标记完成
+- 轻思考：记录暂时想不明白的问题，支持类型、状态、想法追加、初步结论和备注
+- 轻资源：记录一件事消耗的时间、金钱、精力、情绪等生命资源，并包含轮回测试
+- 自我观察：快速记录当下情绪、强度、触发原因、身体感受和当前需要
+- 数据管理：完整导出 `Diary/` ZIP 数据包、Android 系统分享、从数据包导入、查看数据目录与各模块数量
 - 日记 / 足迹 / 读书：分别导出 `.zip` 压缩包交换包
 - 日记统计：最近 18 周绿色热力图
 - APK：已完成 `arm64-v8a` Release 签名包构建，并在 Android 真机正常安装
 - 应用信息：应用名为“人生档案”，已配置自定义启动图标
+
+## Mobile 1.5 每日记录闭环版
+
+- 首页改为“人生档案随手记”，主入口为写日记、记足迹、轻计划、轻思考、轻资源、自我观察，并提供数据管理入口。
+- 旧的日记、足迹、读书、轻计划页面仍然保留，旧数据目录不迁移、不清空。
+- 新增数据保存目录：
+
+```text
+Diary/
+  thoughts/       轻思考，每条 thought.json
+  resources/      轻资源，每条 resource.json
+  observations/   自我观察，每条 observation.json
+```
+
+- 完整备份文件名为 `LifeDiary_Backup_yyyyMMdd_HHmmss.zip`，包内包含 `manifest.json` 和完整 `Diary/` 目录。
+- Android 分享使用 `content://` URI、`FileProvider` 和 `ACTION_SEND`，点击“导出并分享数据包”会生成 ZIP 后直接调起系统分享面板。
+- 导入 ZIP 前会自动导出当前数据备份；非法 ZIP 或缺少合法数据目录时不会执行覆盖。
 
 ## 2.0 同步内容
 
@@ -34,6 +55,9 @@ Diary/
   footprints/
   books/
   plans/
+  thoughts/
+  resources/
+  observations/
   exports/
 ```
 
@@ -90,7 +114,7 @@ cd android/LifeDiaryMobile
 已验证的签名 APK：
 
 ```text
-LifeDiaryMobile-release-signed.apk
+手机直装版/LifeDiaryMobile-Mobile15-release-signed.apk
 ```
 
 说明：`build/` 目录是本地构建产物，推送源码到 GitHub 时通常不提交；需要分发安装包时，可以把签名 APK 上传到 GitHub Release。

@@ -184,9 +184,12 @@ python main.py
 
 ## Android 手机版
 
-手机端工程位于 `android/LifeDiaryMobile/`，基于 Qt 6/QML 实现，已同步桌面版的日记、足迹、读书笔记和轻计划四个模块。
+手机端工程位于 `android/LifeDiaryMobile/`，基于 Qt 6/QML 实现。当前已升级到 Mobile 1.5「每日记录闭环版」，首页主入口包括写日记、记足迹、轻计划、轻思考、轻资源、自我观察和数据管理，旧的日记、足迹、读书笔记、轻计划页面仍继续保留。
 
-当前已完成 Android `arm64-v8a` APK 构建、签名和真机安装验证。签名包文件名为 `LifeDiaryMobile-release-signed.apk`，适合放到 GitHub Release 作为安装包附件；源码仓库只保留 Android 工程和构建配置，`build/` 构建产物不作为源码提交。
+当前 Android 端已接入完整本地 JSON 数据保存、ZIP 备份导出与导入，以及 Android 系统分享数据包。Release 安装包应使用签名 APK 进行分发，源码仓库只保留 Android 工程和构建配置，`build/` 构建产物不作为源码提交。
+
+当前已验证的签名 APK 路径：
+`手机直装版/LifeDiaryMobile-Mobile15-release-signed.apk`
 
 ## 项目结构
 

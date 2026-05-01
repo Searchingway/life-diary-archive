@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LifeDiaryMobile VERSION 0.1.0 LANGUAGES CXX)
+project(LifeDiaryMobile VERSION 1.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,10 +22,15 @@ qt_add_qml_module(LifeDiaryMobile
     VERSION 1.0
     QML_FILES
         qml/Main.qml
+        qml/HomePage.qml
         qml/DiaryPage.qml
         qml/FootprintPage.qml
         qml/BookPage.qml
         qml/PlanPage.qml
+        qml/LightThoughtPage.qml
+        qml/LightResourcePage.qml
+        qml/SelfObservationPage.qml
+        qml/DataManagerPage.qml
         qml/components/FieldLabel.qml
         qml/components/ImageListEditor.qml
         qml/components/RecordCard.qml

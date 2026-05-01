@@ -4,6 +4,7 @@
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -13,8 +14,13 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QUrl>
 #include <QUuid>
+
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#endif
 
 #include <algorithm>
 
@@ -34,6 +40,11 @@ struct ZipEntry {
     quint16 modDate = 0;
 };
 
+struct ReadZipEntry {
+    QString name;
+    QByteArray data;
+};
+
 void appendUInt16(QByteArray *target, quint16 value)
 {
     target->append(char(value & 0xff));
@@ -46,6 +57,25 @@ void appendUInt32(QByteArray *target, quint32 value)
     target->append(char((value >> 8) & 0xff));
     target->append(char((value >> 16) & 0xff));
     target->append(char((value >> 24) & 0xff));
+}
+
+quint16 readUInt16(const QByteArray &data, int offset)
+{
+    if (offset + 1 >= data.size()) {
+        return 0;
+    }
+    return quint16(uchar(data.at(offset))) | (quint16(uchar(data.at(offset + 1))) << 8);
+}
+
+quint32 readUInt32(const QByteArray &data, int offset)
+{
+    if (offset + 3 >= data.size()) {
+        return 0;
+    }
+    return quint32(uchar(data.at(offset)))
+        | (quint32(uchar(data.at(offset + 1))) << 8)
+        | (quint32(uchar(data.at(offset + 2))) << 16)
+        | (quint32(uchar(data.at(offset + 3))) << 24);
 }
 
 quint32 crc32(const QByteArray &data)
@@ -172,6 +202,65 @@ void collectFiles(const QDir &rootDir, const QDir &currentDir, const QString &fo
         });
     }
 }
+
+QString cleanZipName(QString name)
+{
+    name = name.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    while (name.startsWith(QLatin1Char('/'))) {
+        name.remove(0, 1);
+    }
+    if (name.contains(QStringLiteral("..")) || name.contains(QLatin1Char(':'))) {
+        return {};
+    }
+    return name;
+}
+
+bool readStoredZipFile(const QString &zipPath, QList<ReadZipEntry> *entries)
+{
+    QFile file(zipPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    const QByteArray data = file.readAll();
+    int offset = 0;
+    while (offset + 30 <= data.size()) {
+        const quint32 signature = readUInt32(data, offset);
+        if (signature == 0x02014b50U || signature == 0x06054b50U) {
+            break;
+        }
+        if (signature != 0x04034b50U) {
+            return false;
+        }
+
+        const quint16 method = readUInt16(data, offset + 8);
+        const quint32 compressedSize = readUInt32(data, offset + 18);
+        const quint32 uncompressedSize = readUInt32(data, offset + 22);
+        const quint16 nameLength = readUInt16(data, offset + 26);
+        const quint16 extraLength = readUInt16(data, offset + 28);
+        const int nameOffset = offset + 30;
+        const int dataOffset = nameOffset + nameLength + extraLength;
+        const int nextOffset = dataOffset + int(compressedSize);
+        if (nameOffset + nameLength > data.size() || nextOffset > data.size()) {
+            return false;
+        }
+        if (method != 0 || compressedSize != uncompressedSize) {
+            return false;
+        }
+
+        const QString name = cleanZipName(QString::fromUtf8(data.mid(nameOffset, nameLength)));
+        if (!name.isEmpty() && !name.endsWith(QLatin1Char('/'))) {
+            entries->append({name, data.mid(dataOffset, int(uncompressedSize))});
+        }
+        offset = nextOffset;
+    }
+    return !entries->isEmpty();
+}
+
+QString backupFileName()
+{
+    return QStringLiteral("LifeDiary_Backup_%1.zip")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+}
 }
 
 ArchiveStore::ArchiveStore(QObject *parent)
@@ -189,6 +278,9 @@ ArchiveStore::ArchiveStore(QObject *parent)
     ensureDir(footprintsPath());
     ensureDir(booksPath());
     ensureDir(plansPath());
+    ensureDir(thoughtsPath());
+    ensureDir(resourcesPath());
+    ensureDir(observationsPath());
 }
 
 QString ArchiveStore::dataRoot() const
@@ -953,6 +1045,475 @@ bool ArchiveStore::deletePlan(const QString &planId)
     return ok;
 }
 
+QVariantList ArchiveStore::searchThoughts(const QString &query) const
+{
+    QVariantList items;
+    const QDir thoughts(thoughtsPath());
+    for (const QFileInfo &child : thoughts.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const QVariantMap item = loadJsonRecordFromDir(
+            QDir(child.absoluteFilePath()),
+            QStringLiteral("thought.json"),
+            QStringLiteral("title"),
+            QStringLiteral("未命名思考"),
+            false);
+        if (item.isEmpty()) {
+            continue;
+        }
+        if (matchesAny({
+                item.value(QStringLiteral("title")).toString(),
+                item.value(QStringLiteral("description")).toString(),
+                item.value(QStringLiteral("type")).toString(),
+                item.value(QStringLiteral("status")).toString(),
+                item.value(QStringLiteral("preliminary_conclusion")).toString(),
+                item.value(QStringLiteral("notes")).toString(),
+            },
+            query)) {
+            items.append(item);
+        }
+    }
+    sortByUpdated(&items);
+    return items;
+}
+
+QVariantMap ArchiveStore::createThought() const
+{
+    const QString timestamp = nowIso();
+    return {
+        {QStringLiteral("id"), newId()},
+        {QStringLiteral("title"), QString()},
+        {QStringLiteral("description"), QString()},
+        {QStringLiteral("type"), QStringLiteral("其他")},
+        {QStringLiteral("status"), QStringLiteral("思考中")},
+        {QStringLiteral("created_at"), timestamp},
+        {QStringLiteral("updated_at"), timestamp},
+        {QStringLiteral("ideas"), QVariantList()},
+        {QStringLiteral("preliminary_conclusion"), QString()},
+        {QStringLiteral("notes"), QString()},
+        {QStringLiteral("displayTitle"), QStringLiteral("未命名思考")},
+    };
+}
+
+QVariantMap ArchiveStore::getThought(const QString &thoughtId) const
+{
+    if (thoughtId.trimmed().isEmpty()) {
+        return {};
+    }
+    return loadJsonRecordFromDir(
+        QDir(QDir(thoughtsPath()).filePath(thoughtId)),
+        QStringLiteral("thought.json"),
+        QStringLiteral("title"),
+        QStringLiteral("未命名思考"),
+        true);
+}
+
+QVariantMap ArchiveStore::saveThought(const QVariantMap &payload)
+{
+    clearError();
+    QString id = mapString(payload, QStringLiteral("id"));
+    if (id.isEmpty()) {
+        id = newId();
+    }
+    const QString recordDirPath = QDir(thoughtsPath()).filePath(id);
+    if (!ensureDir(recordDirPath)) {
+        setError(QStringLiteral("无法创建轻思考目录"));
+        return {};
+    }
+
+    const QVariantMap existing = getThought(id);
+    const QString timestamp = nowIso();
+    QVariantMap metadata;
+    metadata.insert(QStringLiteral("id"), id);
+    metadata.insert(QStringLiteral("title"), mapString(payload, QStringLiteral("title")));
+    metadata.insert(QStringLiteral("description"), mapString(payload, QStringLiteral("description")));
+    metadata.insert(QStringLiteral("type"), mapString(payload, QStringLiteral("type"), QStringLiteral("其他")));
+    metadata.insert(QStringLiteral("status"), mapString(payload, QStringLiteral("status"), QStringLiteral("思考中")));
+    metadata.insert(QStringLiteral("created_at"), mapString(existing, QStringLiteral("created_at"), timestamp));
+    metadata.insert(QStringLiteral("updated_at"), timestamp);
+    metadata.insert(QStringLiteral("ideas"), readMapList(payload.value(QStringLiteral("ideas"))));
+    metadata.insert(QStringLiteral("preliminary_conclusion"), mapString(payload, QStringLiteral("preliminary_conclusion")));
+    metadata.insert(QStringLiteral("notes"), mapString(payload, QStringLiteral("notes")));
+
+    if (!writeJsonFile(QDir(recordDirPath).filePath(QStringLiteral("thought.json")), metadata)) {
+        setError(QStringLiteral("轻思考保存失败"));
+        return {};
+    }
+    setToast(QStringLiteral("轻思考已保存"));
+    emit dataChanged();
+    return getThought(id);
+}
+
+bool ArchiveStore::deleteThought(const QString &thoughtId)
+{
+    const bool ok = softDelete(
+        QDir(QDir(thoughtsPath()).filePath(thoughtId)).filePath(QStringLiteral("thought.json")),
+        QStringLiteral("找不到要删除的轻思考"));
+    if (ok) {
+        setToast(QStringLiteral("轻思考已删除"));
+        emit dataChanged();
+    }
+    return ok;
+}
+
+QVariantList ArchiveStore::searchResources(const QString &query) const
+{
+    QVariantList items;
+    const QDir resources(resourcesPath());
+    for (const QFileInfo &child : resources.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const QVariantMap item = loadJsonRecordFromDir(
+            QDir(child.absoluteFilePath()),
+            QStringLiteral("resource.json"),
+            QStringLiteral("title"),
+            QStringLiteral("未命名资源评估"),
+            false);
+        if (item.isEmpty()) {
+            continue;
+        }
+        if (matchesAny({
+                item.value(QStringLiteral("title")).toString(),
+                item.value(QStringLiteral("description")).toString(),
+                item.value(QStringLiteral("type")).toString(),
+                item.value(QStringLiteral("status")).toString(),
+                item.value(QStringLiteral("overall_judgement")).toString(),
+                item.value(QStringLiteral("subjective_feeling")).toString(),
+                item.value(QStringLiteral("notes")).toString(),
+            },
+            query)) {
+            items.append(item);
+        }
+    }
+    sortByUpdated(&items);
+    return items;
+}
+
+QVariantMap ArchiveStore::createResource() const
+{
+    const QString timestamp = nowIso();
+    QVariantMap recurrenceTest;
+    recurrenceTest.insert(QStringLiteral("next_week"), QString());
+    recurrenceTest.insert(QStringLiteral("one_year"), QString());
+    recurrenceTest.insert(QStringLiteral("repeat_willingness"), QString());
+    return {
+        {QStringLiteral("id"), newId()},
+        {QStringLiteral("title"), QString()},
+        {QStringLiteral("description"), QString()},
+        {QStringLiteral("type"), QStringLiteral("其他")},
+        {QStringLiteral("status"), QStringLiteral("考虑中")},
+        {QStringLiteral("created_at"), timestamp},
+        {QStringLiteral("updated_at"), timestamp},
+        {QStringLiteral("resource_items"), QVariantList()},
+        {QStringLiteral("overall_judgement"), QString()},
+        {QStringLiteral("subjective_feeling"), QString()},
+        {QStringLiteral("recurrence_test"), recurrenceTest},
+        {QStringLiteral("notes"), QString()},
+        {QStringLiteral("displayTitle"), QStringLiteral("未命名资源评估")},
+    };
+}
+
+QVariantMap ArchiveStore::getResource(const QString &resourceId) const
+{
+    if (resourceId.trimmed().isEmpty()) {
+        return {};
+    }
+    return loadJsonRecordFromDir(
+        QDir(QDir(resourcesPath()).filePath(resourceId)),
+        QStringLiteral("resource.json"),
+        QStringLiteral("title"),
+        QStringLiteral("未命名资源评估"),
+        true);
+}
+
+QVariantMap ArchiveStore::saveResource(const QVariantMap &payload)
+{
+    clearError();
+    QString id = mapString(payload, QStringLiteral("id"));
+    if (id.isEmpty()) {
+        id = newId();
+    }
+    const QString recordDirPath = QDir(resourcesPath()).filePath(id);
+    if (!ensureDir(recordDirPath)) {
+        setError(QStringLiteral("无法创建轻资源目录"));
+        return {};
+    }
+
+    const QVariantMap existing = getResource(id);
+    const QString timestamp = nowIso();
+    QVariantMap metadata;
+    metadata.insert(QStringLiteral("id"), id);
+    metadata.insert(QStringLiteral("title"), mapString(payload, QStringLiteral("title")));
+    metadata.insert(QStringLiteral("description"), mapString(payload, QStringLiteral("description")));
+    metadata.insert(QStringLiteral("type"), mapString(payload, QStringLiteral("type"), QStringLiteral("其他")));
+    metadata.insert(QStringLiteral("status"), mapString(payload, QStringLiteral("status"), QStringLiteral("考虑中")));
+    metadata.insert(QStringLiteral("created_at"), mapString(existing, QStringLiteral("created_at"), timestamp));
+    metadata.insert(QStringLiteral("updated_at"), timestamp);
+    metadata.insert(QStringLiteral("resource_items"), readMapList(payload.value(QStringLiteral("resource_items"))));
+    metadata.insert(QStringLiteral("overall_judgement"), mapString(payload, QStringLiteral("overall_judgement")));
+    metadata.insert(QStringLiteral("subjective_feeling"), mapString(payload, QStringLiteral("subjective_feeling")));
+    metadata.insert(QStringLiteral("recurrence_test"), payload.value(QStringLiteral("recurrence_test")).toMap());
+    metadata.insert(QStringLiteral("notes"), mapString(payload, QStringLiteral("notes")));
+
+    if (!writeJsonFile(QDir(recordDirPath).filePath(QStringLiteral("resource.json")), metadata)) {
+        setError(QStringLiteral("轻资源保存失败"));
+        return {};
+    }
+    setToast(QStringLiteral("轻资源已保存"));
+    emit dataChanged();
+    return getResource(id);
+}
+
+bool ArchiveStore::deleteResource(const QString &resourceId)
+{
+    const bool ok = softDelete(
+        QDir(QDir(resourcesPath()).filePath(resourceId)).filePath(QStringLiteral("resource.json")),
+        QStringLiteral("找不到要删除的轻资源"));
+    if (ok) {
+        setToast(QStringLiteral("轻资源已删除"));
+        emit dataChanged();
+    }
+    return ok;
+}
+
+QVariantList ArchiveStore::searchObservations(const QString &query) const
+{
+    QVariantList items;
+    const QDir observations(observationsPath());
+    for (const QFileInfo &child : observations.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const QVariantMap item = loadJsonRecordFromDir(
+            QDir(child.absoluteFilePath()),
+            QStringLiteral("observation.json"),
+            QStringLiteral("emotion"),
+            QStringLiteral("未命名观察"),
+            false);
+        if (item.isEmpty()) {
+            continue;
+        }
+        if (matchesAny({
+                item.value(QStringLiteral("time")).toString(),
+                item.value(QStringLiteral("emotion")).toString(),
+                item.value(QStringLiteral("trigger")).toString(),
+                item.value(QStringLiteral("body_sensation")).toString(),
+                item.value(QStringLiteral("need")).toString(),
+                item.value(QStringLiteral("notes")).toString(),
+            },
+            query)) {
+            items.append(item);
+        }
+    }
+    sortByUpdated(&items);
+    return items;
+}
+
+QVariantMap ArchiveStore::createObservation() const
+{
+    const QString timestamp = nowIso();
+    return {
+        {QStringLiteral("id"), newId()},
+        {QStringLiteral("time"), timestamp},
+        {QStringLiteral("emotion"), QStringLiteral("平静")},
+        {QStringLiteral("intensity"), 3},
+        {QStringLiteral("trigger"), QString()},
+        {QStringLiteral("body_sensation"), QString()},
+        {QStringLiteral("need"), QStringLiteral("写下来")},
+        {QStringLiteral("notes"), QString()},
+        {QStringLiteral("created_at"), timestamp},
+        {QStringLiteral("updated_at"), timestamp},
+        {QStringLiteral("displayTitle"), QStringLiteral("平静")},
+    };
+}
+
+QVariantMap ArchiveStore::getObservation(const QString &observationId) const
+{
+    if (observationId.trimmed().isEmpty()) {
+        return {};
+    }
+    return loadJsonRecordFromDir(
+        QDir(QDir(observationsPath()).filePath(observationId)),
+        QStringLiteral("observation.json"),
+        QStringLiteral("emotion"),
+        QStringLiteral("未命名观察"),
+        true);
+}
+
+QVariantMap ArchiveStore::saveObservation(const QVariantMap &payload)
+{
+    clearError();
+    QString id = mapString(payload, QStringLiteral("id"));
+    if (id.isEmpty()) {
+        id = newId();
+    }
+    const QString recordDirPath = QDir(observationsPath()).filePath(id);
+    if (!ensureDir(recordDirPath)) {
+        setError(QStringLiteral("无法创建自我观察目录"));
+        return {};
+    }
+
+    const QVariantMap existing = getObservation(id);
+    const QString timestamp = nowIso();
+    QVariantMap metadata;
+    metadata.insert(QStringLiteral("id"), id);
+    metadata.insert(QStringLiteral("time"), mapString(payload, QStringLiteral("time"), timestamp));
+    metadata.insert(QStringLiteral("emotion"), mapString(payload, QStringLiteral("emotion"), QStringLiteral("平静")));
+    metadata.insert(QStringLiteral("intensity"), std::clamp(payload.value(QStringLiteral("intensity"), 3).toInt(), 1, 5));
+    metadata.insert(QStringLiteral("trigger"), mapString(payload, QStringLiteral("trigger")));
+    metadata.insert(QStringLiteral("body_sensation"), mapString(payload, QStringLiteral("body_sensation")));
+    metadata.insert(QStringLiteral("need"), mapString(payload, QStringLiteral("need"), QStringLiteral("写下来")));
+    metadata.insert(QStringLiteral("notes"), mapString(payload, QStringLiteral("notes")));
+    metadata.insert(QStringLiteral("created_at"), mapString(existing, QStringLiteral("created_at"), timestamp));
+    metadata.insert(QStringLiteral("updated_at"), timestamp);
+
+    if (!writeJsonFile(QDir(recordDirPath).filePath(QStringLiteral("observation.json")), metadata)) {
+        setError(QStringLiteral("自我观察保存失败"));
+        return {};
+    }
+    setToast(QStringLiteral("自我观察已保存"));
+    emit dataChanged();
+    return getObservation(id);
+}
+
+bool ArchiveStore::deleteObservation(const QString &observationId)
+{
+    const bool ok = softDelete(
+        QDir(QDir(observationsPath()).filePath(observationId)).filePath(QStringLiteral("observation.json")),
+        QStringLiteral("找不到要删除的自我观察"));
+    if (ok) {
+        setToast(QStringLiteral("自我观察已删除"));
+        emit dataChanged();
+    }
+    return ok;
+}
+
+QVariantMap ArchiveStore::dataOverview() const
+{
+    QVariantList modules;
+    const auto appendModule = [&modules](const QString &key, const QString &title, int count, const QString &folder) {
+        QVariantMap item;
+        item.insert(QStringLiteral("key"), key);
+        item.insert(QStringLiteral("title"), title);
+        item.insert(QStringLiteral("count"), count);
+        item.insert(QStringLiteral("folder"), folder);
+        modules.append(item);
+    };
+
+    appendModule(QStringLiteral("entries"), QStringLiteral("日记"), countRecords(entriesPath(), QStringLiteral("entry.json")), QStringLiteral("entries/"));
+    appendModule(QStringLiteral("footprints"), QStringLiteral("足迹"), countRecords(footprintsPath(), QStringLiteral("footprint.json")), QStringLiteral("footprints/"));
+    appendModule(QStringLiteral("books"), QStringLiteral("读书笔记"), countRecords(booksPath(), QStringLiteral("book.json")), QStringLiteral("books/"));
+    appendModule(QStringLiteral("plans"), QStringLiteral("轻计划"), countRecords(plansPath(), QStringLiteral("plan.json")), QStringLiteral("plans/"));
+    appendModule(QStringLiteral("thoughts"), QStringLiteral("轻思考"), countRecords(thoughtsPath(), QStringLiteral("thought.json")), QStringLiteral("thoughts/"));
+    appendModule(QStringLiteral("resources"), QStringLiteral("轻资源"), countRecords(resourcesPath(), QStringLiteral("resource.json")), QStringLiteral("resources/"));
+    appendModule(QStringLiteral("observations"), QStringLiteral("自我观察"), countRecords(observationsPath(), QStringLiteral("observation.json")), QStringLiteral("observations/"));
+
+    QVariantMap result;
+    result.insert(QStringLiteral("dataRoot"), dataRoot());
+    result.insert(QStringLiteral("modules"), modules);
+    result.insert(QStringLiteral("exportsPath"), QDir::toNativeSeparators(exportsPath()));
+    result.insert(QStringLiteral("description"), QStringLiteral("数据以可读 JSON、Markdown 和图片文件保存在本机 Diary 目录，建议定期导出完整备份。"));
+    return result;
+}
+
+QString ArchiveStore::exportFullBackup(bool forShare)
+{
+    clearError();
+    const QString targetDirPath = forShare ? shareBackupsPath() : exportsPath();
+    if (!ensureDir(targetDirPath)) {
+        setError(QStringLiteral("无法创建备份目录"));
+        return {};
+    }
+
+    QString zipPath = QDir(targetDirPath).filePath(backupFileName());
+    int counter = 1;
+    while (QFileInfo::exists(zipPath)) {
+        zipPath = QDir(targetDirPath).filePath(QStringLiteral("LifeDiary_Backup_%1_%2.zip")
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")))
+            .arg(counter));
+        ++counter;
+    }
+
+    QString displayPath;
+    if (!addFullBackupEntries(zipPath, forShare, &displayPath)) {
+        return {};
+    }
+    setToast(QStringLiteral("数据包已导出：%1").arg(displayPath));
+    return displayPath;
+}
+
+bool ArchiveStore::exportAndShareBackup()
+{
+    const QString zipPath = exportFullBackup(true);
+    if (zipPath.isEmpty()) {
+        return false;
+    }
+    if (!shareFileOnAndroid(zipPath)) {
+        setError(QStringLiteral("分享面板调起失败，已生成数据包：%1").arg(zipPath));
+        return false;
+    }
+    setToast(QStringLiteral("数据包已生成，请选择微信、QQ 或其他 App 分享"));
+    return true;
+}
+
+bool ArchiveStore::importBackupPackage(const QUrl &sourceUrl)
+{
+    clearError();
+    const QString sourcePath = localPathFromUrl(sourceUrl);
+    if (sourcePath.isEmpty() || !QFileInfo::exists(sourcePath)) {
+        setError(QStringLiteral("请选择本机可读取的 ZIP 数据包"));
+        return false;
+    }
+
+    QString tempDiaryPath;
+    QStringList topLevelFolders;
+    if (!extractBackupToTemp(sourcePath, &tempDiaryPath, &topLevelFolders)) {
+        setError(QStringLiteral("数据包不合法：需要包含 manifest.json 或合法 Diary 数据目录"));
+        return false;
+    }
+
+    const QString safetyPath = exportFullBackup(false);
+    if (safetyPath.isEmpty()) {
+        setError(QStringLiteral("导入前自动备份失败，已停止导入"));
+        return false;
+    }
+
+    const QStringList allowedFolders = {
+        QStringLiteral("entries"),
+        QStringLiteral("footprints"),
+        QStringLiteral("books"),
+        QStringLiteral("plans"),
+        QStringLiteral("thoughts"),
+        QStringLiteral("resources"),
+        QStringLiteral("observations"),
+    };
+
+    for (const QString &folder : topLevelFolders) {
+        if (!allowedFolders.contains(folder)) {
+            continue;
+        }
+        const QString sourceFolder = QDir(tempDiaryPath).filePath(folder);
+        const QString targetFolder = QDir(m_root).filePath(folder);
+        const QString stagingName = QStringLiteral(".import_staging_%1_%2").arg(newId(), folder);
+        const QString stagingFolder = QDir(m_root).filePath(stagingName);
+        if (QFileInfo::exists(stagingFolder)) {
+            QDir(stagingFolder).removeRecursively();
+        }
+        if (!copyDirectory(sourceFolder, stagingFolder)) {
+            QDir(stagingFolder).removeRecursively();
+            setError(QStringLiteral("导入失败，当前数据未覆盖；导入前备份在：%1").arg(safetyPath));
+            return false;
+        }
+        if (QFileInfo::exists(targetFolder) && !QDir(targetFolder).removeRecursively()) {
+            QDir(stagingFolder).removeRecursively();
+            setError(QStringLiteral("导入失败，当前数据未完整覆盖；导入前备份在：%1").arg(safetyPath));
+            return false;
+        }
+        if (!QDir(m_root).rename(stagingName, folder)) {
+            QDir(stagingFolder).removeRecursively();
+            setError(QStringLiteral("导入失败，导入前备份在：%1").arg(safetyPath));
+            return false;
+        }
+    }
+
+    setToast(QStringLiteral("导入成功，建议重启 App 后查看全部数据"));
+    emit dataChanged();
+    return true;
+}
+
 QString ArchiveStore::entriesPath() const
 {
     return QDir(m_root).filePath(QStringLiteral("entries"));
@@ -973,9 +1534,30 @@ QString ArchiveStore::plansPath() const
     return QDir(m_root).filePath(QStringLiteral("plans"));
 }
 
+QString ArchiveStore::thoughtsPath() const
+{
+    return QDir(m_root).filePath(QStringLiteral("thoughts"));
+}
+
+QString ArchiveStore::resourcesPath() const
+{
+    return QDir(m_root).filePath(QStringLiteral("resources"));
+}
+
+QString ArchiveStore::observationsPath() const
+{
+    return QDir(m_root).filePath(QStringLiteral("observations"));
+}
+
 QString ArchiveStore::exportsPath() const
 {
     return QDir(m_root).filePath(QStringLiteral("exports"));
+}
+
+QString ArchiveStore::shareBackupsPath() const
+{
+    const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    return QDir(cache.isEmpty() ? exportsPath() : cache).filePath(QStringLiteral("share/backups"));
 }
 
 QVariantMap ArchiveStore::loadDiaryFromDir(const QDir &entryDir, bool includeDeleted) const
@@ -1207,6 +1789,26 @@ QVariantMap ArchiveStore::loadPlanFromDir(const QDir &planDir, bool includeDelet
     return plan;
 }
 
+QVariantMap ArchiveStore::loadJsonRecordFromDir(
+    const QDir &recordDir,
+    const QString &jsonFile,
+    const QString &titleKey,
+    const QString &fallbackTitle,
+    bool includeDeleted) const
+{
+    bool ok = false;
+    QVariantMap data = readJsonFile(recordDir.filePath(jsonFile), &ok);
+    if (!ok) {
+        return {};
+    }
+    if (data.value(QStringLiteral("deleted")).toBool() && !includeDeleted) {
+        return {};
+    }
+    data.insert(QStringLiteral("id"), mapString(data, QStringLiteral("id"), recordDir.dirName()));
+    data.insert(QStringLiteral("displayTitle"), cleanTitle(data.value(titleKey).toString(), fallbackTitle));
+    return data;
+}
+
 bool ArchiveStore::writeJsonFile(const QString &path, const QVariantMap &value)
 {
     QSaveFile file(path);
@@ -1300,6 +1902,18 @@ QVariantList ArchiveStore::readImages(const QVariant &value) const
         }
     }
     return images;
+}
+
+QVariantList ArchiveStore::readMapList(const QVariant &value) const
+{
+    QVariantList items;
+    for (const QVariant &item : value.toList()) {
+        QVariantMap map = item.toMap();
+        if (!map.isEmpty()) {
+            items.append(map);
+        }
+    }
+    return items;
 }
 
 QString ArchiveStore::imageDirForScope(const QString &scope, const QString &primaryId, const QString &secondaryId) const
@@ -1567,6 +2181,210 @@ void ArchiveStore::sortPlans(QVariantList *items) const
             + b.value(QStringLiteral("displayTitle")).toString().toLower();
         return keyA < keyB;
     });
+}
+
+int ArchiveStore::countRecords(const QString &folderPath, const QString &jsonFile) const
+{
+    int count = 0;
+    const QDir dir(folderPath);
+    for (const QFileInfo &child : dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        bool ok = false;
+        const QVariantMap data = readJsonFile(QDir(child.absoluteFilePath()).filePath(jsonFile), &ok);
+        if (ok && !data.value(QStringLiteral("deleted")).toBool()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+bool ArchiveStore::addFullBackupEntries(const QString &zipPath, bool forShare, QString *displayPath)
+{
+    const QDir rootDir(m_root);
+    if (!rootDir.exists()) {
+        setError(QStringLiteral("当前数据目录不存在"));
+        return false;
+    }
+
+    QList<ZipEntry> entries;
+    collectFiles(rootDir, rootDir, QStringLiteral("Diary"), &entries);
+
+    QVariantList moduleList;
+    const QVariantList modules = dataOverview().value(QStringLiteral("modules")).toList();
+    for (const QVariant &item : modules) {
+        moduleList.append(item.toMap());
+    }
+
+    QVariantMap manifest;
+    manifest.insert(QStringLiteral("app"), QStringLiteral("LifeDiary"));
+    manifest.insert(QStringLiteral("platform"), QStringLiteral("Android Qt/QML"));
+    manifest.insert(QStringLiteral("backup_time"), QDateTime::currentDateTime().toString(Qt::ISODateWithMs));
+    manifest.insert(QStringLiteral("version"), QStringLiteral("Mobile 1.5"));
+    manifest.insert(QStringLiteral("modules"), moduleList);
+    manifest.insert(QStringLiteral("data_directory"), QStringLiteral("Diary"));
+    manifest.insert(QStringLiteral("share_ready"), forShare);
+
+    entries.prepend({
+        QStringLiteral("manifest.json"),
+        QJsonDocument::fromVariant(manifest).toJson(QJsonDocument::Indented),
+        0,
+        0,
+        0,
+        0,
+    });
+
+    if (!writeZipFile(zipPath, entries)) {
+        setError(QStringLiteral("完整数据包导出失败"));
+        return false;
+    }
+    if (displayPath) {
+        *displayPath = QDir::toNativeSeparators(zipPath);
+    }
+    return true;
+}
+
+bool ArchiveStore::copyDirectory(const QString &sourcePath, const QString &targetPath) const
+{
+    const QDir sourceDir(sourcePath);
+    if (!sourceDir.exists()) {
+        return false;
+    }
+    QDir targetDir(targetPath);
+    if (!targetDir.exists() && !targetDir.mkpath(QStringLiteral("."))) {
+        return false;
+    }
+
+    QDirIterator iterator(sourcePath, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (iterator.hasNext()) {
+        iterator.next();
+        const QString relativePath = sourceDir.relativeFilePath(iterator.filePath());
+        const QString targetFilePath = targetDir.filePath(relativePath);
+        if (!QDir().mkpath(QFileInfo(targetFilePath).absolutePath())) {
+            return false;
+        }
+        QFile::remove(targetFilePath);
+        if (!QFile::copy(iterator.filePath(), targetFilePath)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ArchiveStore::extractBackupToTemp(const QString &zipPath, QString *tempDiaryPath, QStringList *topLevelFolders) const
+{
+    QList<ReadZipEntry> entries;
+    if (!readStoredZipFile(zipPath, &entries)) {
+        return false;
+    }
+
+    bool hasManifest = false;
+    bool hasDiaryFolder = false;
+    QString prefix;
+    for (const ReadZipEntry &entry : entries) {
+        if (entry.name == QStringLiteral("manifest.json")) {
+            hasManifest = true;
+        }
+        if (entry.name.startsWith(QStringLiteral("Diary/"))) {
+            hasDiaryFolder = true;
+            prefix = QStringLiteral("Diary/");
+        }
+    }
+    if (!hasDiaryFolder) {
+        const QStringList legalRoots = {
+            QStringLiteral("entries/"),
+            QStringLiteral("footprints/"),
+            QStringLiteral("books/"),
+            QStringLiteral("plans/"),
+            QStringLiteral("thoughts/"),
+            QStringLiteral("resources/"),
+            QStringLiteral("observations/"),
+        };
+        for (const ReadZipEntry &entry : entries) {
+            for (const QString &root : legalRoots) {
+                if (entry.name.startsWith(root)) {
+                    hasDiaryFolder = true;
+                    break;
+                }
+            }
+            if (hasDiaryFolder) {
+                break;
+            }
+        }
+    }
+    if (!hasManifest && !hasDiaryFolder) {
+        return false;
+    }
+
+    const QString tempRoot = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+        .filePath(QStringLiteral("life_diary_import_%1").arg(newId()));
+    const QString diaryPath = QDir(tempRoot).filePath(QStringLiteral("Diary"));
+    if (!QDir().mkpath(diaryPath)) {
+        return false;
+    }
+
+    QSet<QString> folders;
+    for (const ReadZipEntry &entry : entries) {
+        QString relativeName = entry.name;
+        if (!prefix.isEmpty()) {
+            if (!relativeName.startsWith(prefix)) {
+                continue;
+            }
+            relativeName.remove(0, prefix.size());
+        }
+        if (relativeName.isEmpty() || relativeName == QStringLiteral("manifest.json")) {
+            continue;
+        }
+        const QString folder = relativeName.section(QLatin1Char('/'), 0, 0);
+        if (!folder.isEmpty()) {
+            folders.insert(folder);
+        }
+        const QString targetPath = QDir(diaryPath).filePath(relativeName);
+        if (!QDir().mkpath(QFileInfo(targetPath).absolutePath())) {
+            return false;
+        }
+        QSaveFile file(targetPath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            return false;
+        }
+        file.write(entry.data);
+        if (!file.commit()) {
+            return false;
+        }
+    }
+
+    if (tempDiaryPath) {
+        *tempDiaryPath = diaryPath;
+    }
+    if (topLevelFolders) {
+        *topLevelFolders = folders.values();
+    }
+    return !folders.isEmpty();
+}
+
+QString ArchiveStore::localPathFromUrl(const QUrl &sourceUrl) const
+{
+    if (sourceUrl.isLocalFile()) {
+        return sourceUrl.toLocalFile();
+    }
+    const QString value = sourceUrl.toString();
+    if (value.startsWith(QStringLiteral("file:"))) {
+        return QUrl(value).toLocalFile();
+    }
+    return value;
+}
+
+bool ArchiveStore::shareFileOnAndroid(const QString &filePath)
+{
+#ifdef Q_OS_ANDROID
+    const bool ok = QJniObject::callStaticMethod<jboolean>(
+        "com/localfirst/lifediary/LifeDiaryShare",
+        "shareZip",
+        "(Ljava/lang/String;)Z",
+        QJniObject::fromString(filePath).object<jstring>());
+    return ok;
+#else
+    Q_UNUSED(filePath);
+    return true;
+#endif
 }
 
 void ArchiveStore::setError(const QString &message)

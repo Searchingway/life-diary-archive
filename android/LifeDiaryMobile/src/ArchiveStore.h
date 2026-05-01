@@ -63,6 +63,29 @@ public:
     Q_INVOKABLE QVariantMap savePlan(const QVariantMap &payload);
     Q_INVOKABLE bool deletePlan(const QString &planId);
 
+    Q_INVOKABLE QVariantList searchThoughts(const QString &query) const;
+    Q_INVOKABLE QVariantMap createThought() const;
+    Q_INVOKABLE QVariantMap getThought(const QString &thoughtId) const;
+    Q_INVOKABLE QVariantMap saveThought(const QVariantMap &payload);
+    Q_INVOKABLE bool deleteThought(const QString &thoughtId);
+
+    Q_INVOKABLE QVariantList searchResources(const QString &query) const;
+    Q_INVOKABLE QVariantMap createResource() const;
+    Q_INVOKABLE QVariantMap getResource(const QString &resourceId) const;
+    Q_INVOKABLE QVariantMap saveResource(const QVariantMap &payload);
+    Q_INVOKABLE bool deleteResource(const QString &resourceId);
+
+    Q_INVOKABLE QVariantList searchObservations(const QString &query) const;
+    Q_INVOKABLE QVariantMap createObservation() const;
+    Q_INVOKABLE QVariantMap getObservation(const QString &observationId) const;
+    Q_INVOKABLE QVariantMap saveObservation(const QVariantMap &payload);
+    Q_INVOKABLE bool deleteObservation(const QString &observationId);
+
+    Q_INVOKABLE QVariantMap dataOverview() const;
+    Q_INVOKABLE QString exportFullBackup(bool forShare = false);
+    Q_INVOKABLE bool exportAndShareBackup();
+    Q_INVOKABLE bool importBackupPackage(const QUrl &sourceUrl);
+
 signals:
     void dataChanged();
     void lastErrorChanged();
@@ -77,13 +100,23 @@ private:
     QString footprintsPath() const;
     QString booksPath() const;
     QString plansPath() const;
+    QString thoughtsPath() const;
+    QString resourcesPath() const;
+    QString observationsPath() const;
     QString exportsPath() const;
+    QString shareBackupsPath() const;
 
     QVariantMap loadDiaryFromDir(const QDir &entryDir, bool includeDeleted) const;
     QVariantMap loadFootprintFromDir(const QDir &placeDir, bool includeDeleted) const;
     QVariantMap loadVisitFromDir(const QDir &visitDir) const;
     QVariantMap loadBookFromDir(const QDir &bookDir, bool includeDeleted) const;
     QVariantMap loadPlanFromDir(const QDir &planDir, bool includeDeleted) const;
+    QVariantMap loadJsonRecordFromDir(
+        const QDir &recordDir,
+        const QString &jsonFile,
+        const QString &titleKey,
+        const QString &fallbackTitle,
+        bool includeDeleted) const;
 
     bool writeJsonFile(const QString &path, const QVariantMap &value);
     QVariantMap readJsonFile(const QString &path, bool *ok = nullptr) const;
@@ -93,6 +126,7 @@ private:
     bool softDelete(const QString &jsonPath, const QString &missingMessage);
 
     QVariantList readImages(const QVariant &value) const;
+    QVariantList readMapList(const QVariant &value) const;
     QString imageDirForScope(const QString &scope, const QString &primaryId, const QString &secondaryId) const;
     QString imageFileNameFromUrl(const QUrl &sourceUrl) const;
     QString uniqueImageName(const QString &imagesDirPath, const QString &originalName) const;
@@ -110,6 +144,12 @@ private:
     void sortByUpdated(QVariantList *items) const;
     void sortDiaries(QVariantList *items) const;
     void sortPlans(QVariantList *items) const;
+    int countRecords(const QString &folderPath, const QString &jsonFile) const;
+    bool addFullBackupEntries(const QString &zipPath, bool forShare, QString *displayPath);
+    bool copyDirectory(const QString &sourcePath, const QString &targetPath) const;
+    bool extractBackupToTemp(const QString &zipPath, QString *tempDiaryPath, QStringList *topLevelFolders) const;
+    QString localPathFromUrl(const QUrl &sourceUrl) const;
+    bool shareFileOnAndroid(const QString &filePath);
 
     void setError(const QString &message);
     void setToast(const QString &message);

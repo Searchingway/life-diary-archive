@@ -9,11 +9,27 @@ ApplicationWindow {
     width: 390
     height: 844
     visible: true
-    title: "人生档案"
+    title: "人生档案随手记"
     color: "#F6F7F3"
 
     Material.theme: Material.Light
     Material.accent: "#315C3C"
+
+    function openPage(key) {
+        const map = {
+            "diary": diaryPageComponent,
+            "footprint": footprintPageComponent,
+            "plan": planPageComponent,
+            "thought": thoughtPageComponent,
+            "resource": resourcePageComponent,
+            "observation": observationPageComponent,
+            "data": dataManagerPageComponent,
+            "book": bookPageComponent
+        }
+        if (map[key]) {
+            stack.push(map[key])
+        }
+    }
 
     header: ToolBar {
         height: 56
@@ -21,15 +37,24 @@ ApplicationWindow {
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 18
+            anchors.leftMargin: 10
             anchors.rightMargin: 18
+            spacing: 8
+
+            ToolButton {
+                visible: stack.depth > 1
+                text: "‹"
+                font.pixelSize: 26
+                onClicked: stack.pop()
+            }
 
             Label {
                 Layout.fillWidth: true
-                text: "人生档案"
+                text: stack.currentItem && stack.currentItem.pageTitle ? stack.currentItem.pageTitle : "人生档案随手记"
                 color: "#202722"
                 font.pixelSize: 20
                 font.weight: Font.DemiBold
+                elide: Text.ElideRight
             }
 
             Label {
@@ -41,28 +66,24 @@ ApplicationWindow {
         }
     }
 
-    SwipeView {
-        id: pages
+    StackView {
+        id: stack
         anchors.fill: parent
-        currentIndex: nav.currentIndex
-        interactive: false
-
-        DiaryPage {}
-        FootprintPage {}
-        BookPage {}
-        PlanPage {}
+        initialItem: HomePage {
+            onOpenPage: function(key) {
+                window.openPage(key)
+            }
+        }
     }
 
-    footer: TabBar {
-        id: nav
-        currentIndex: pages.currentIndex
-        background: Rectangle { color: "#FFFFFF" }
-
-        TabButton { text: "日记" }
-        TabButton { text: "足迹" }
-        TabButton { text: "读书" }
-        TabButton { text: "计划" }
-    }
+    Component { id: diaryPageComponent; DiaryPage { property string pageTitle: "写日记" } }
+    Component { id: footprintPageComponent; FootprintPage { property string pageTitle: "记足迹" } }
+    Component { id: planPageComponent; PlanPage { property string pageTitle: "轻计划" } }
+    Component { id: thoughtPageComponent; LightThoughtPage { property string pageTitle: "轻思考" } }
+    Component { id: resourcePageComponent; LightResourcePage { property string pageTitle: "轻资源" } }
+    Component { id: observationPageComponent; SelfObservationPage { property string pageTitle: "自我观察" } }
+    Component { id: dataManagerPageComponent; DataManagerPage { property string pageTitle: "数据管理" } }
+    Component { id: bookPageComponent; BookPage { property string pageTitle: "读书笔记" } }
 
     Popup {
         id: toastPopup
