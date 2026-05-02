@@ -15,7 +15,15 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from life_dairy.backup_service import create_backup, restore_backup, validate_backup
+from life_dairy.backup_service import (
+    count_module_records,
+    create_backup,
+    import_mobile_backup,
+    restore_backup,
+    run_data_health_check,
+    validate_backup,
+    validate_mobile_backup,
+)
 from life_dairy.book_storage import BookStorage
 from life_dairy.footprint_storage import FootprintStorage
 from life_dairy.lesson_storage import LessonStorage
@@ -126,6 +134,110 @@ class BackupServiceTests(unittest.TestCase):
         loaded = DiaryStorage(self.data_root).list_entries()
         self.assertEqual(["不能被覆盖"], [item.title for item in loaded])
         self.assertFalse(any(self.backup_dir.glob("BeforeRestoreBackup_*.zip")))
+
+    def test_import_mobile_backup_merges_new_modules_and_preserves_current_data(self) -> None:
+        current = self.diary_storage.create_empty_entry()
+        current.title = "电脑端原有日记"
+        self.diary_storage.save_entry(current)
+
+        mobile_root = self.case_dir / "MobileDiary"
+        mobile_storage = DiaryStorage(mobile_root)
+        incoming = mobile_storage.create_empty_entry()
+        incoming.title = "手机端日记"
+        mobile_storage.save_entry(incoming)
+        thought_dir = mobile_root / "thoughts" / "thought-1"
+        thought_dir.mkdir(parents=True)
+        (thought_dir / "thought.json").write_text(
+            json.dumps(
+                {
+                    "id": "thought-1",
+                    "title": "要不要接这个需求",
+                    "type": "接单思考",
+                    "status": "思考中",
+                    "created_at": "2026-05-01T10:00:00+08:00",
+                    "updated_at": "2026-05-01T10:00:00+08:00",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        resource_dir = mobile_root / "resources" / "resource-1"
+        resource_dir.mkdir(parents=True)
+        (resource_dir / "resource.json").write_text(
+            json.dumps(
+                {
+                    "id": "resource-1",
+                    "title": "周末加班",
+                    "type": "项目",
+                    "status": "考虑中",
+                    "created_at": "2026-05-01T10:00:00+08:00",
+                    "updated_at": "2026-05-01T10:00:00+08:00",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        observation_dir = mobile_root / "observations" / "observation-1"
+        observation_dir.mkdir(parents=True)
+        (observation_dir / "observation.json").write_text(
+            json.dumps(
+                {
+                    "id": "observation-1",
+                    "time": "2026-05-01T10:00:00+08:00",
+                    "emotion": "焦虑",
+                    "intensity": 4,
+                    "trigger": "客户临时改需求",
+                    "created_at": "2026-05-01T10:00:00+08:00",
+                    "updated_at": "2026-05-01T10:00:00+08:00",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        mobile_zip = create_backup(mobile_root, self.backup_dir, "Mobile 1.5", filename_prefix="LifeDiary_Backup")
+
+        valid, message, manifest = validate_mobile_backup(mobile_zip)
+        self.assertTrue(valid, message)
+        self.assertIn("modules", manifest)
+
+        safety_backup, stats, _manifest = import_mobile_backup(mobile_zip, self.data_root, self.backup_dir, "3.0")
+
+        self.assertTrue(safety_backup.exists())
+        self.assertEqual(4, stats["imported"])
+        self.assertEqual(1, stats["entries"])
+        self.assertEqual(1, stats["thoughts"])
+        self.assertEqual(1, stats["resources"])
+        self.assertEqual(1, stats["observations"])
+        titles = [entry.title for entry in DiaryStorage(self.data_root).list_entries()]
+        self.assertIn("电脑端原有日记", titles)
+        self.assertIn("手机端日记", titles)
+        counts = count_module_records(self.data_root)
+        self.assertEqual(1, counts["thoughts"])
+        self.assertEqual(1, counts["resources"])
+        self.assertEqual(1, counts["observations"])
+
+    def test_import_invalid_mobile_backup_does_not_create_safety_backup(self) -> None:
+        entry = self.diary_storage.create_empty_entry()
+        entry.title = "导入失败不能丢"
+        self.diary_storage.save_entry(entry)
+        bad_zip = self.case_dir / "bad_mobile.zip"
+        bad_zip.write_text("bad zip", encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            import_mobile_backup(bad_zip, self.data_root, self.backup_dir, "3.0")
+
+        titles = [entry.title for entry in DiaryStorage(self.data_root).list_entries()]
+        self.assertEqual(["导入失败不能丢"], titles)
+        self.assertFalse(any(self.backup_dir.glob("BeforeMobileImportBackup_*.zip")))
+
+    def test_data_health_check_reports_parse_errors_in_plain_chinese(self) -> None:
+        broken_dir = self.data_root / "thoughts" / "broken"
+        broken_dir.mkdir(parents=True)
+        (broken_dir / "thought.json").write_text("{bad", encoding="utf-8")
+
+        results = run_data_health_check(self.data_root)
+
+        self.assertTrue(any(level == "错误" and "JSON 格式错误" in message for level, message in results))
 
 
 if __name__ == "__main__":

@@ -7,8 +7,13 @@ from pathlib import Path
 from .book_storage import BookStorage
 from .footprint_storage import FootprintStorage
 from .lesson_storage import LessonStorage
+from .observation_storage import ObservationStorage
 from .plan_storage import PlanStorage
+from .resource_storage import ResourceStorage
+from .self_analysis_storage import SelfAnalysisStorage
 from .storage import DiaryStorage
+from .thought_storage import ThoughtStorage
+from .work_storage import WorkStorage
 
 
 @dataclass(slots=True)
@@ -21,6 +26,8 @@ class OverviewStats:
     year_diary_chars: int = 0
     year_diary_images: int = 0
     year_completed_plans: int = 0
+    module_counts: dict[str, int] | None = None
+    latest_updates: dict[str, str] | None = None
 
 
 @dataclass(slots=True)
@@ -44,12 +51,22 @@ class OverviewService:
         book_storage: BookStorage,
         plan_storage: PlanStorage,
         lesson_storage: LessonStorage,
+        self_analysis_storage: SelfAnalysisStorage | None = None,
+        work_storage: WorkStorage | None = None,
+        thought_storage: ThoughtStorage | None = None,
+        resource_storage: ResourceStorage | None = None,
+        observation_storage: ObservationStorage | None = None,
     ):
         self.diary_storage = diary_storage
         self.footprint_storage = footprint_storage
         self.book_storage = book_storage
         self.plan_storage = plan_storage
         self.lesson_storage = lesson_storage
+        self.self_analysis_storage = self_analysis_storage
+        self.work_storage = work_storage
+        self.thought_storage = thought_storage
+        self.resource_storage = resource_storage
+        self.observation_storage = observation_storage
 
     def build_stats(self, today: date | None = None) -> OverviewStats:
         current = today or date.today()
@@ -79,6 +96,7 @@ class OverviewService:
             if plan_date.startswith(year_prefix):
                 stats.year_completed_plans += 1
 
+        stats.module_counts, stats.latest_updates = self.build_module_summary()
         return stats
 
     def build_timeline(self, limit: int = 30) -> list[TimelineItem]:
@@ -88,8 +106,32 @@ class OverviewService:
         items.extend(self._book_items())
         items.extend(self._plan_items())
         items.extend(self._lesson_items())
+        items.extend(self._self_analysis_items())
+        items.extend(self._work_items())
+        items.extend(self._thought_items())
+        items.extend(self._resource_items())
+        items.extend(self._observation_items())
         items.sort(key=lambda item: (item.date or "", item.sort_key, item.title), reverse=True)
         return items[:limit]
+
+    def build_module_summary(self) -> tuple[dict[str, int], dict[str, str]]:
+        modules: list[tuple[str, list]] = [
+            ("日记", self.diary_storage.list_entries()),
+            ("足迹", self.footprint_storage.list_places()),
+            ("作品感悟", self._safe_list(self.work_storage.list_works if self.work_storage else None) or self.book_storage.list_books()),
+            ("轻计划", self.plan_storage.list_plans()),
+            ("教训反思", self.lesson_storage.list_lessons()),
+            ("自我分析", self._safe_list(self.self_analysis_storage.list_analyses if self.self_analysis_storage else None)),
+            ("轻思考", self._safe_list(self.thought_storage.list_thoughts if self.thought_storage else None)),
+            ("轻资源", self._safe_list(self.resource_storage.list_resources if self.resource_storage else None)),
+            ("自我观察", self._safe_list(self.observation_storage.list_observations if self.observation_storage else None)),
+        ]
+        counts: dict[str, int] = {}
+        latest: dict[str, str] = {}
+        for label, items in modules:
+            counts[label] = len(items)
+            latest[label] = max((str(getattr(item, "updated_at", "")) for item in items), default="")
+        return counts, latest
 
     def _diary_items(self) -> list[TimelineItem]:
         items = []
@@ -127,12 +169,14 @@ class OverviewService:
         return items
 
     def _book_items(self) -> list[TimelineItem]:
+        if self.work_storage is not None:
+            return []
         items = []
         for book in self.book_storage.list_books():
             item_date = book.finish_date or book.start_date or self._date_from_iso(book.updated_at)
             items.append(
                 TimelineItem(
-                    record_type="读书",
+                    record_type="作品感悟",
                     record_id=book.id,
                     date=item_date,
                     title=book.display_title,
@@ -144,6 +188,96 @@ class OverviewService:
                 ),
             )
         return items
+
+    def _self_analysis_items(self) -> list[TimelineItem]:
+        if self.self_analysis_storage is None:
+            return []
+        return [
+            TimelineItem(
+                record_type="自我分析",
+                record_id=analysis.id,
+                date=analysis.date or self._date_from_iso(analysis.updated_at),
+                title=analysis.display_title,
+                summary=self._summary(analysis.trigger_event or analysis.insight or analysis.repeated_pattern),
+                image_count=self._count_files(self.self_analysis_storage.image_dir(analysis.id)),
+                status=analysis.analysis_type,
+                source_module="self_analysis",
+                sort_key=analysis.updated_at,
+            )
+            for analysis in self.self_analysis_storage.list_analyses()
+        ]
+
+    def _work_items(self) -> list[TimelineItem]:
+        if self.work_storage is None:
+            return []
+        items = []
+        for work in self.work_storage.list_works():
+            item_date = work.finish_date or work.start_date or self._date_from_iso(work.updated_at)
+            items.append(
+                TimelineItem(
+                    record_type="作品感悟",
+                    record_id=work.id,
+                    date=item_date,
+                    title=work.display_title,
+                    summary=self._summary(work.one_sentence or work.summary or work.final_review),
+                    image_count=self._count_files(self.work_storage.image_dir(work.id)),
+                    status=f"{work.work_type} / {work.status}",
+                    source_module="works",
+                    sort_key=work.updated_at,
+                )
+            )
+        return items
+
+    def _thought_items(self) -> list[TimelineItem]:
+        if self.thought_storage is None:
+            return []
+        return [
+            TimelineItem(
+                record_type="轻思考",
+                record_id=thought.id,
+                date=self._date_from_iso(thought.updated_at),
+                title=thought.display_title,
+                summary=self._summary(thought.description or thought.preliminary_conclusion),
+                status=f"{thought.thought_type} / {thought.status}",
+                source_module="thoughts",
+                sort_key=thought.updated_at,
+            )
+            for thought in self.thought_storage.list_thoughts()
+        ]
+
+    def _resource_items(self) -> list[TimelineItem]:
+        if self.resource_storage is None:
+            return []
+        return [
+            TimelineItem(
+                record_type="轻资源",
+                record_id=resource.id,
+                date=self._date_from_iso(resource.updated_at),
+                title=resource.display_title,
+                summary=self._summary(resource.description or resource.overall_judgement),
+                status=f"{resource.resource_type} / {resource.status}",
+                source_module="resources",
+                sort_key=resource.updated_at,
+            )
+            for resource in self.resource_storage.list_resources()
+        ]
+
+    def _observation_items(self) -> list[TimelineItem]:
+        if self.observation_storage is None:
+            return []
+        return [
+            TimelineItem(
+                record_type="自我观察",
+                record_id=observation.id,
+                date=observation.date,
+                title=observation.display_title,
+                summary=self._summary(observation.trigger or observation.body_sensation or observation.need),
+                status=f"{observation.emotion} / 强度 {observation.intensity}",
+                source_module="observations",
+                sort_key=observation.updated_at,
+            )
+            for observation in self.observation_storage.list_observations()
+        ]
 
     def _plan_items(self) -> list[TimelineItem]:
         items = []
@@ -214,3 +348,11 @@ class OverviewService:
     def _is_completed_status(self, status: str) -> bool:
         normalized = (status or "").strip()
         return normalized in {"已完成", "已做到"} or "完成" in normalized or "做到" in normalized
+
+    def _safe_list(self, loader) -> list:
+        if loader is None:
+            return []
+        try:
+            return list(loader())
+        except Exception:
+            return []

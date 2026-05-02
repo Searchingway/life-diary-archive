@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Iterable
 from uuid import uuid4
 
+from .book_storage import BookStorage
 from .models import WorkEntry, WorkImage, WorkImageDraft, now_iso
 
 
-WORK_TYPES = ["电影", "动画", "游戏", "剧集", "漫画", "音乐", "播客", "纪录片", "其他"]
+WORK_TYPES = ["书籍", "电影", "纪录片", "动漫", "动画", "游戏", "文章", "音乐", "课程", "视频", "展览", "其他"]
 WORK_STATUSES = ["想看", "进行中", "已完成", "暂停", "放弃"]
 WORK_SECTIONS = [
     "一句话印象",
@@ -28,6 +29,7 @@ class WorkStorage:
     def __init__(self, root_dir: Path | str):
         self.root_dir = Path(root_dir)
         self.works_dir = self.root_dir / "works"
+        self.book_storage = BookStorage(self.root_dir)
         self.works_dir.mkdir(parents=True, exist_ok=True)
 
     def create_empty_work(self) -> WorkEntry:
@@ -62,10 +64,15 @@ class WorkStorage:
         return self.works_dir / work_id
 
     def image_dir(self, work_id: str) -> Path:
+        if not self.work_dir(work_id).exists() and self.book_storage.book_dir(work_id).exists():
+            return self.book_storage.image_dir(work_id)
         return self.work_dir(work_id) / "images"
 
     def resolve_image_path(self, work_id: str, image_name: str) -> Path:
         return self.image_dir(work_id) / image_name
+
+    def record_exists(self, work_id: str) -> bool:
+        return self.work_dir(work_id).exists() or self.book_storage.book_dir(work_id).exists()
 
     def list_works(self, query: str = "", work_type: str = "全部") -> list[WorkEntry]:
         keyword = query.strip().lower()
@@ -79,6 +86,17 @@ class WorkStorage:
                 work = self._load_work_from_directory(child, include_deleted=False)
             except (FileNotFoundError, KeyError, json.JSONDecodeError, OSError, ValueError):
                 continue
+            if selected_type and selected_type != "全部" and work.work_type != selected_type:
+                continue
+            if keyword and not self._matches_query(work, keyword):
+                continue
+            items.append(work)
+
+        existing_ids = {item.id for item in items}
+        for book in self.book_storage.list_books(query):
+            if book.id in existing_ids:
+                continue
+            work = self._book_to_work(book)
             if selected_type and selected_type != "全部" and work.work_type != selected_type:
                 continue
             if keyword and not self._matches_query(work, keyword):
@@ -118,10 +136,17 @@ class WorkStorage:
         return self.load_work(work.id)
 
     def load_work(self, work_id: str) -> WorkEntry:
+        if self.work_dir(work_id).exists():
+            return self._load_work_from_directory(self.work_dir(work_id), include_deleted=True)
+        if self.book_storage.book_dir(work_id).exists():
+            return self._book_to_work(self.book_storage.load_book(work_id))
         return self._load_work_from_directory(self.work_dir(work_id), include_deleted=True)
 
     def delete_work(self, work_id: str) -> None:
         work_dir = self.work_dir(work_id)
+        if not work_dir.exists() and self.book_storage.book_dir(work_id).exists():
+            self.book_storage.delete_book(work_id)
+            return
         if not work_dir.exists():
             raise FileNotFoundError(f"找不到要删除的作品感悟记录：{work_id}")
         metadata_path = work_dir / "work.json"
@@ -168,6 +193,33 @@ class WorkStorage:
             " ".join(item.display_title for item in work.related_self_analysis),
         ]
         return any(keyword in text.lower() for text in haystacks if text)
+
+    def _book_to_work(self, book) -> WorkEntry:
+        return WorkEntry(
+            id=book.id,
+            title=book.title,
+            work_type="书籍",
+            creator=book.author,
+            status=book.status,
+            start_date=book.start_date,
+            finish_date=book.finish_date,
+            rating="",
+            tags=book.tags,
+            one_sentence=book.summary,
+            summary=book.summary,
+            liked="",
+            disliked="",
+            touched=book.notes,
+            favorite_parts="",
+            self_connection="",
+            past_connection="",
+            final_review=book.notes,
+            created_at=book.created_at,
+            updated_at=book.updated_at,
+            images=[WorkImage(file_name=image.file_name, label=image.label) for image in book.images],
+            related_diaries=[],
+            related_self_analysis=[],
+        )
 
     def _build_content(self, work: WorkEntry) -> str:
         values = {

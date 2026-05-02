@@ -122,7 +122,7 @@ class WorkPage(AutoSaveMixin, QWidget):
         self._build_ui()
         self._init_auto_save()
         self.refresh_work_list()
-        if self.work_list.count() > 0:
+        if self.work_list.count() > 0 and self.work_list.item(0).data(Qt.ItemDataRole.UserRole):
             self.work_list.setCurrentRow(0)
         else:
             self.new_work()
@@ -156,6 +156,12 @@ class WorkPage(AutoSaveMixin, QWidget):
         self.type_filter_combo = QComboBox(widget)
         self.type_filter_combo.addItems(["全部", *WORK_TYPES])
         self.type_filter_combo.currentTextChanged.connect(self.refresh_work_list)
+        self.status_filter_combo = QComboBox(widget)
+        self.status_filter_combo.addItems(["全部", *WORK_STATUSES])
+        self.status_filter_combo.currentTextChanged.connect(self.refresh_work_list)
+        self.tag_filter_input = QLineEdit(widget)
+        self.tag_filter_input.setPlaceholderText("按标签筛选")
+        self.tag_filter_input.textChanged.connect(self.refresh_work_list)
         self.new_button = QPushButton("新建作品感悟", widget)
         self.new_button.clicked.connect(self.new_work)
         self.delete_button = QPushButton("删除当前记录", widget)
@@ -166,6 +172,8 @@ class WorkPage(AutoSaveMixin, QWidget):
         layout.addWidget(title)
         layout.addWidget(self.search_input)
         layout.addWidget(self.type_filter_combo)
+        layout.addWidget(self.status_filter_combo)
+        layout.addWidget(self.tag_filter_input)
         layout.addWidget(self.new_button)
         layout.addWidget(self.delete_button)
         layout.addWidget(self.work_list, 1)
@@ -348,10 +356,19 @@ class WorkPage(AutoSaveMixin, QWidget):
         current_id = select_id or (self.current_work.id if self.current_work is not None else None)
         query = self.search_input.text() if hasattr(self, "search_input") else ""
         work_type = self.type_filter_combo.currentText() if hasattr(self, "type_filter_combo") else "全部"
+        status = self.status_filter_combo.currentText() if hasattr(self, "status_filter_combo") else "全部"
+        tag_filter = self.tag_filter_input.text().strip().lower() if hasattr(self, "tag_filter_input") else ""
         blocker = QSignalBlocker(self.work_list)
         self.work_list.clear()
         target_row = -1
-        for row, work in enumerate(self.storage.list_works(query, work_type)):
+        visible_works = []
+        for work in self.storage.list_works(query, work_type):
+            if status != "全部" and work.status != status:
+                continue
+            if tag_filter and not any(tag_filter in tag.lower() for tag in work.tags):
+                continue
+            visible_works.append(work)
+        for row, work in enumerate(visible_works):
             item = QListWidgetItem(self._build_work_list_text(work))
             item.setData(Qt.ItemDataRole.UserRole, work.id)
             item.setToolTip(work.one_sentence or work.final_review or work.display_title)
@@ -361,6 +378,8 @@ class WorkPage(AutoSaveMixin, QWidget):
         if target_row >= 0:
             self.work_list.setCurrentRow(target_row)
         del blocker
+        if self.work_list.count() == 0:
+            self.work_list.addItem("暂无作品感悟记录。")
 
     def new_work(self) -> None:
         if not self._maybe_keep_changes():
@@ -398,7 +417,7 @@ class WorkPage(AutoSaveMixin, QWidget):
             if reply != QMessageBox.StandardButton.Yes:
                 self._resume_auto_save()
                 return
-        if self.current_work.id and self.storage.work_dir(self.current_work.id).exists():
+        if self.current_work.id and self.storage.record_exists(self.current_work.id):
             try:
                 work = self.storage.load_work(self.current_work.id)
             except Exception as exc:
@@ -413,7 +432,7 @@ class WorkPage(AutoSaveMixin, QWidget):
     def delete_current_work(self) -> None:
         if self.current_work is None:
             return
-        if not self.storage.work_dir(self.current_work.id).exists():
+        if not self.storage.record_exists(self.current_work.id):
             reply = QMessageBox.question(
                 self,
                 "放弃草稿",
@@ -443,7 +462,7 @@ class WorkPage(AutoSaveMixin, QWidget):
         self.image_items = []
         self._set_dirty(False)
         self.refresh_work_list()
-        if self.work_list.count() > 0:
+        if self.work_list.count() > 0 and self.work_list.item(0).data(Qt.ItemDataRole.UserRole):
             self.work_list.setCurrentRow(0)
         else:
             self.new_work()
@@ -619,7 +638,7 @@ class WorkPage(AutoSaveMixin, QWidget):
         self.image_items = []
         self._set_dirty(False)
         self.refresh_work_list()
-        if self.work_list.count() > 0:
+        if self.work_list.count() > 0 and self.work_list.item(0).data(Qt.ItemDataRole.UserRole):
             self.work_list.setCurrentRow(0)
         else:
             self.new_work()
@@ -816,7 +835,7 @@ class WorkPage(AutoSaveMixin, QWidget):
     def _auto_save_has_meaningful_content(self) -> bool:
         if self.current_work is None:
             return False
-        if self.storage.work_dir(self.current_work.id).exists():
+        if self.storage.record_exists(self.current_work.id):
             return True
         return bool(
             self.title_input.text().strip()

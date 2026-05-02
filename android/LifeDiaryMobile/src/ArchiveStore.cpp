@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -1441,8 +1442,26 @@ bool ArchiveStore::exportAndShareBackup()
     if (zipPath.isEmpty()) {
         return false;
     }
+    const QFileInfo zipInfo(zipPath);
+    qInfo() << "LifeDiary share ZIP ready:" << zipInfo.absoluteFilePath()
+            << "exists:" << zipInfo.exists()
+            << "size:" << zipInfo.size();
+    if (!zipInfo.exists() || !zipInfo.isFile() || zipInfo.size() <= 0) {
+        setError(QStringLiteral("备份文件生成失败"));
+        return false;
+    }
     if (!shareFileOnAndroid(zipPath)) {
-        setError(QStringLiteral("分享面板调起失败，已生成数据包：%1").arg(zipPath));
+        QString shareError;
+#ifdef Q_OS_ANDROID
+        shareError = QJniObject::callStaticObjectMethod(
+            "com/localfirst/lifediary/LifeDiaryShare",
+            "lastShareError",
+            "()Ljava/lang/String;").toString();
+#endif
+        if (shareError.isEmpty()) {
+            shareError = QStringLiteral("分享面板调起失败");
+        }
+        setError(QStringLiteral("%1，已生成数据包：%2").arg(shareError, zipPath));
         return false;
     }
     setToast(QStringLiteral("数据包已生成，请选择微信、QQ 或其他 App 分享"));
@@ -2236,6 +2255,7 @@ bool ArchiveStore::addFullBackupEntries(const QString &zipPath, bool forShare, Q
         setError(QStringLiteral("完整数据包导出失败"));
         return false;
     }
+
     if (displayPath) {
         *displayPath = QDir::toNativeSeparators(zipPath);
     }

@@ -20,11 +20,13 @@ from .ui_helpers import make_scroll_area
 class OverviewPage(QWidget):
     backup_requested = Signal()
     restore_requested = Signal()
+    open_record_requested = Signal(str, str)
 
     def __init__(self, service: OverviewService, parent: QWidget | None = None):
         super().__init__(parent)
         self.service = service
         self.stat_labels: dict[str, QLabel] = {}
+        self.module_list: QListWidget | None = None
         self._build_ui()
         self.refresh_overview()
 
@@ -54,6 +56,7 @@ class OverviewPage(QWidget):
 
         layout.addLayout(header_row)
         layout.addWidget(self._build_stats_group())
+        layout.addWidget(self._build_module_group())
         layout.addWidget(self._build_timeline_group(), 1)
         outer.addWidget(make_scroll_area(content))
 
@@ -90,10 +93,19 @@ class OverviewPage(QWidget):
 
         return group
 
+    def _build_module_group(self) -> QWidget:
+        group = QGroupBox("全模块数量与最近更新时间", self)
+        layout = QVBoxLayout(group)
+        self.module_list = QListWidget(group)
+        self.module_list.setMaximumHeight(150)
+        layout.addWidget(self.module_list)
+        return group
+
     def _build_timeline_group(self) -> QWidget:
         group = QGroupBox("最近记录时间线", self)
         layout = QVBoxLayout(group)
         self.timeline_list = QListWidget(group)
+        self.timeline_list.itemDoubleClicked.connect(self._open_selected_timeline_item)
         layout.addWidget(self.timeline_list, 1)
         return group
 
@@ -106,6 +118,15 @@ class OverviewPage(QWidget):
     def _fill_stats(self, stats: OverviewStats) -> None:
         for key, label in self.stat_labels.items():
             label.setText(str(getattr(stats, key)))
+        if self.module_list is not None:
+            self.module_list.clear()
+            counts = stats.module_counts or {}
+            latest = stats.latest_updates or {}
+            for name, count in counts.items():
+                latest_text = latest.get(name, "")[:19].replace("T", " ") or "暂无"
+                self.module_list.addItem(f"{name}：{count} 条，最近更新 {latest_text}")
+            if self.module_list.count() == 0:
+                self.module_list.addItem("暂无模块统计。")
 
     def _fill_timeline(self, items: list[TimelineItem]) -> None:
         self.timeline_list.clear()
@@ -120,9 +141,16 @@ class OverviewPage(QWidget):
             if item.image_count:
                 lines.append(f"图片：{item.image_count} 张")
             list_item = QListWidgetItem("\n".join(lines))
-            list_item.setData(Qt.ItemDataRole.UserRole, item.record_id)
+            list_item.setData(Qt.ItemDataRole.UserRole, (item.source_module, item.record_id))
             list_item.setToolTip(item.source_module)
             self.timeline_list.addItem(list_item)
+
+    def _open_selected_timeline_item(self, item: QListWidgetItem) -> None:
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        source_module, record_id = data
+        self.open_record_requested.emit(str(source_module), str(record_id))
 
     def _show_status(self, message: str, timeout: int = 3000) -> None:
         window = self.window()

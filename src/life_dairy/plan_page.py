@@ -357,6 +357,15 @@ class PlanPage(AutoSaveMixin, QWidget):
         self._fill_form(plan)
         self.refresh_list(select_id=plan.id)
 
+    def open_plan_by_id(self, plan_id: str) -> None:
+        try:
+            plan = self.storage.load_plan(plan_id)
+        except Exception as exc:
+            QMessageBox.critical(self, "读取失败", f"读取轻计划时出错：\n{exc}")
+            return
+        self._fill_form(plan)
+        self.refresh_list(select_id=plan.id)
+
     def _discard_current_draft(self, status_message: str) -> None:
         self.current_plan = None
         self._set_dirty(False)
