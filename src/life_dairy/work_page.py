@@ -239,15 +239,8 @@ class WorkPage(AutoSaveMixin, QWidget):
 
         self.section_edits: dict[str, QTextEdit] = {}
         for attr, label in [
-            ("one_sentence", "一句话印象"),
-            ("summary", "内容摘要"),
-            ("liked", "我喜欢的地方"),
-            ("disliked", "我不喜欢的地方"),
-            ("touched", "触动我的地方"),
-            ("favorite_parts", "喜欢的角色 / 场景 / 台词"),
-            ("self_connection", "让我想到的自己"),
-            ("past_connection", "和我过去经历的关联"),
-            ("final_review", "我的最终评价"),
+            ("summary", "摘录/片段"),
+            ("final_review", "我的感悟"),
         ]:
             edit = self._make_text_edit(label)
             self.section_edits[attr] = edit
@@ -256,10 +249,8 @@ class WorkPage(AutoSaveMixin, QWidget):
 
         lower_splitter = QSplitter(Qt.Orientation.Horizontal, widget)
         lower_splitter.setMinimumHeight(320)
-        lower_splitter.addWidget(self._build_related_group())
         lower_splitter.addWidget(self._build_image_group())
         lower_splitter.setChildrenCollapsible(False)
-        lower_splitter.setSizes([450, 520])
 
         right_splitter = QSplitter(Qt.Orientation.Vertical, widget)
         right_splitter.addWidget(info_group)
@@ -597,10 +588,36 @@ class WorkPage(AutoSaveMixin, QWidget):
             self._set_date_edit(self.finish_date_edit, work.finish_date)
             self.rating_input.setText(work.rating)
             self.tags_input.setText(", ".join(work.tags))
-            for attr, edit in self.section_edits.items():
-                edit.setPlainText(str(getattr(work, attr)))
-            self._refresh_related_diary_list()
-            self._refresh_related_analysis_list()
+            
+            # 合并旧字段到新字段中
+            summary_parts = []
+            if work.one_sentence:
+                summary_parts.append(f"# 一句话印象\n{work.one_sentence}")
+            if work.summary:
+                summary_parts.append(f"# 内容摘要\n{work.summary}")
+            if work.liked:
+                summary_parts.append(f"# 我喜欢的地方\n{work.liked}")
+            if work.disliked:
+                summary_parts.append(f"# 我不喜欢的地方\n{work.disliked}")
+            if work.touched:
+                summary_parts.append(f"# 触动我的地方\n{work.touched}")
+            if work.favorite_parts:
+                summary_parts.append(f"# 喜欢的角色/场景/台词\n{work.favorite_parts}")
+            merged_summary = "\n\n".join(summary_parts) if summary_parts else ""
+            if "summary" in self.section_edits:
+                self.section_edits["summary"].setPlainText(merged_summary or work.summary)
+            
+            final_review_parts = []
+            if work.self_connection:
+                final_review_parts.append(f"# 让我想到的自己\n{work.self_connection}")
+            if work.past_connection:
+                final_review_parts.append(f"# 和我过去经历的关联\n{work.past_connection}")
+            if work.final_review:
+                final_review_parts.append(f"# 我的最终评价\n{work.final_review}")
+            merged_final_review = "\n\n".join(final_review_parts) if final_review_parts else ""
+            if "final_review" in self.section_edits:
+                self.section_edits["final_review"].setPlainText(merged_final_review or work.final_review)
+            
             self._refresh_image_list()
             self._set_dirty(False)
         finally:
@@ -830,7 +847,13 @@ class WorkPage(AutoSaveMixin, QWidget):
         return self.maybe_finish_pending_changes()
 
     def _auto_save_now(self) -> bool:
-        return self.save_work()
+        work = self._read_form()
+        try:
+            self.storage.save_work(work, self.image_items)
+        except Exception:
+            return False
+        self._set_dirty(False)
+        return True
 
     def _auto_save_has_meaningful_content(self) -> bool:
         if self.current_work is None:

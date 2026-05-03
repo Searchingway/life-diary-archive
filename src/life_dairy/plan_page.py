@@ -418,7 +418,13 @@ class PlanPage(AutoSaveMixin, QWidget):
         return self.maybe_finish_pending_changes()
 
     def _auto_save_now(self) -> bool:
-        return self.save_plan()
+        plan = self._read_form()
+        try:
+            self.storage.save_plan(plan)
+        except Exception:
+            return False
+        self._set_dirty(False)
+        return True
 
     def _auto_save_has_meaningful_content(self) -> bool:
         if self.current_plan is None:

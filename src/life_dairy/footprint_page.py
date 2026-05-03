@@ -1023,7 +1023,18 @@ class FootprintPage(AutoSaveMixin, QWidget):
         return self.maybe_finish_pending_changes()
 
     def _auto_save_now(self) -> bool:
-        return self.save_place()
+        if self.current_place is None:
+            self.current_place = self.storage.create_empty_place()
+        try:
+            self.storage.save_place(
+                self.current_place,
+                self.place_image_items,
+                self.visit_image_items,
+            )
+        except Exception:
+            return False
+        self._set_dirty(False)
+        return True
 
     def _auto_save_has_meaningful_content(self) -> bool:
         if self.current_place is None:

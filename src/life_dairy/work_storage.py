@@ -10,17 +10,10 @@ from .book_storage import BookStorage
 from .models import WorkEntry, WorkImage, WorkImageDraft, now_iso
 
 
-WORK_TYPES = ["书籍", "电影", "纪录片", "动漫", "动画", "游戏", "文章", "音乐", "课程", "视频", "展览", "其他"]
-WORK_STATUSES = ["想看", "进行中", "已完成", "暂停", "放弃"]
+WORK_TYPES = ["书籍", "电影", "动漫", "游戏", "文章", "视频", "课程", "其他"]
+WORK_STATUSES = ["想看", "进行中", "已完成", "暂停"]
 WORK_SECTIONS = [
-    "一句话印象",
     "内容摘要",
-    "我喜欢的地方",
-    "我不喜欢的地方",
-    "触动我的地方",
-    "喜欢的角色 / 场景 / 台词",
-    "让我想到的自己",
-    "和我过去经历的关联",
     "我的最终评价",
 ]
 
@@ -223,14 +216,7 @@ class WorkStorage:
 
     def _build_content(self, work: WorkEntry) -> str:
         values = {
-            "一句话印象": work.one_sentence,
             "内容摘要": work.summary,
-            "我喜欢的地方": work.liked,
-            "我不喜欢的地方": work.disliked,
-            "触动我的地方": work.touched,
-            "喜欢的角色 / 场景 / 台词": work.favorite_parts,
-            "让我想到的自己": work.self_connection,
-            "和我过去经历的关联": work.past_connection,
             "我的最终评价": work.final_review,
         }
         parts = []
@@ -240,24 +226,73 @@ class WorkStorage:
 
     def _parse_content(self, content: str) -> dict[str, str]:
         sections = {title: "" for title in WORK_SECTIONS}
+        # 同时也支持旧的标题，用于兼容旧数据
+        all_titles = {
+            "一句话印象": "一句话印象",
+            "内容摘要": "内容摘要",
+            "我喜欢的地方": "我喜欢的地方",
+            "我不喜欢的地方": "我不喜欢的地方",
+            "触动我的地方": "触动我的地方",
+            "喜欢的角色 / 场景 / 台词": "喜欢的角色 / 场景 / 台词",
+            "让我想到的自己": "让我想到的自己",
+            "和我过去经历的关联": "和我过去经历的关联",
+            "我的最终评价": "我的最终评价",
+        }
         current_title: str | None = None
         current_lines: list[str] = []
 
         def flush() -> None:
-            if current_title in sections:
+            if current_title:
                 sections[current_title] = "\n".join(current_lines).strip()
 
         for line in content.splitlines():
             if line.startswith("# "):
                 flush()
                 title = line[2:].strip()
-                current_title = title if title in sections else None
+                current_title = title
                 current_lines = []
                 continue
             if current_title is not None:
                 current_lines.append(line)
         flush()
-        return sections
+        
+        # 如果有新标题，直接返回
+        if sections.get("内容摘要") or sections.get("我的最终评价"):
+            return sections
+        
+        # 如果只有旧标题，合并旧数据到新字段
+        merged_sections = {
+            "内容摘要": "",
+            "我的最终评价": "",
+        }
+        
+        # 合并旧字段到新字段
+        summary_parts = []
+        if sections.get("一句话印象"):
+            summary_parts.append(f"# 一句话印象\n{sections.get('一句话印象')}")
+        if sections.get("内容摘要"):
+            summary_parts.append(f"# 内容摘要\n{sections.get('内容摘要')}")
+        if sections.get("我喜欢的地方"):
+            summary_parts.append(f"# 我喜欢的地方\n{sections.get('我喜欢的地方')}")
+        if sections.get("我不喜欢的地方"):
+            summary_parts.append(f"# 我不喜欢的地方\n{sections.get('我不喜欢的地方')}")
+        if sections.get("触动我的地方"):
+            summary_parts.append(f"# 触动我的地方\n{sections.get('触动我的地方')}")
+        if sections.get("喜欢的角色 / 场景 / 台词"):
+            summary_parts.append(f"# 喜欢的角色 / 场景 / 台词\n{sections.get('喜欢的角色 / 场景 / 台词')}")
+        
+        final_review_parts = []
+        if sections.get("让我想到的自己"):
+            final_review_parts.append(f"# 让我想到的自己\n{sections.get('让我想到的自己')}")
+        if sections.get("和我过去经历的关联"):
+            final_review_parts.append(f"# 和我过去经历的关联\n{sections.get('和我过去经历的关联')}")
+        if sections.get("我的最终评价"):
+            final_review_parts.append(f"# 我的最终评价\n{sections.get('我的最终评价')}")
+        
+        merged_sections["内容摘要"] = "\n\n".join(summary_parts) if summary_parts else ""
+        merged_sections["我的最终评价"] = "\n\n".join(final_review_parts) if final_review_parts else ""
+        
+        return merged_sections
 
     def _sync_images(
         self,
