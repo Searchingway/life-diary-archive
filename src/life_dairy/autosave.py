@@ -3,8 +3,12 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
+from .logger import get_logger
+
 
 class AutoSaveMixin:
+    _logger = get_logger('autosave')
+
     def _init_auto_save(self, interval_ms: int = 3000) -> None:
         self._auto_save_timer = QTimer(self)
         self._auto_save_timer.setSingleShot(True)
@@ -47,14 +51,16 @@ class AutoSaveMixin:
 
         try:
             saved = bool(self._auto_save_now())
-        except Exception:
-            saved = False
+        except Exception as exc:
+            self._logger.exception(f"自动保存失败: {exc}")
+            self._show_auto_save_status("自动保存失败，请手动保存")
+            return False
 
         if saved and not getattr(self, "is_dirty", False):
             self._show_auto_save_status("已自动保存")
             return True
 
-        self._show_auto_save_status("自动保存失败")
+        self._show_auto_save_status("自动保存失败，请手动保存")
         return False
 
     def maybe_finish_pending_changes(self) -> bool:

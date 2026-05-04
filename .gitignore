@@ -47,9 +47,7 @@ release/
 *.keystore
 *.jks
 pc_installer_work/
-电脑直装版/
-手机直装版/
-image/
+
 packaging/windows/payload/
 packaging/windows/installer_payload*/
 packaging/windows/build*/
@@ -84,3 +82,7 @@ android/**/android-build/
 # 签名
 android/**/android-release.keystore
 
+# Ai
+run_claude_deepseek_flash.bat
+.claude
+.trae

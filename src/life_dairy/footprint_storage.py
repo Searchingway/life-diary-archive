@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable
 from uuid import uuid4
 
+from .logger import get_logger
 from .models import (
     FootprintImage,
     FootprintImageDraft,
@@ -14,6 +15,8 @@ from .models import (
     FootprintVisit,
     now_iso,
 )
+
+logger = get_logger('footprint_storage')
 
 
 class FootprintStorage:
@@ -87,6 +90,7 @@ class FootprintStorage:
             try:
                 place = self._load_place_from_directory(child, include_deleted=False)
             except (FileNotFoundError, KeyError, json.JSONDecodeError, OSError, ValueError):
+                logger.debug("跳过无法读取的足迹记录: %s", child.name)
                 continue
             if keyword and not self._matches_query(place, keyword):
                 continue
@@ -357,4 +361,5 @@ class FootprintStorage:
                 try:
                     child.unlink()
                 except OSError:
+                    logger.warning("无法删除未使用的图片: %s", child)
                     continue

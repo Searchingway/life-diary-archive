@@ -8,7 +8,7 @@ from uuid import uuid4
 from .models import now_iso
 
 
-OBSERVATION_EMOTIONS = ["开心", "平静", "焦虑", "难过", "生气", "疲惫", "空虚", "兴奋", "烦躁", "其他"]
+OBSERVATION_EMOTIONS = ["平静", "开心", "轻松", "期待", "焦虑", "难过", "委屈", "生气", "疲惫", "空虚", "其他"]
 OBSERVATION_NEEDS = ["休息", "吃饭", "睡觉", "运动", "找人说话", "继续做事", "暂时放下", "写下来", "其他"]
 
 

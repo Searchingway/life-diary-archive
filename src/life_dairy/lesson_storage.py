@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Iterable
 from uuid import uuid4
 
+from .logger import get_logger
 from .models import LessonEntry, LessonImage, LessonImageDraft, now_iso
+
+logger = get_logger('lesson_storage')
 
 
 LESSON_CATEGORIES = ["学习", "接单", "情绪", "人际", "金钱", "项目", "身体", "其他"]
@@ -72,6 +75,7 @@ class LessonStorage:
             try:
                 lesson = self._load_lesson_from_directory(child, include_deleted=False)
             except (FileNotFoundError, KeyError, json.JSONDecodeError, OSError, ValueError):
+                logger.debug("跳过无法读取的反思记录: %s", child.name)
                 continue
             if selected_category and selected_category != "全部" and lesson.category != selected_category:
                 continue
@@ -249,4 +253,5 @@ class LessonStorage:
                 try:
                     child.unlink()
                 except OSError:
+                    logger.warning("无法删除未使用的图片: %s", child)
                     continue

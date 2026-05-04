@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Iterable
 from uuid import uuid4
 
+from .logger import get_logger
 from .models import SelfAnalysisEntry, SelfAnalysisImage, SelfAnalysisImageDraft, now_iso
+
+logger = get_logger('self_analysis_storage')
 
 
 SELF_ANALYSIS_TYPES = [
@@ -91,6 +94,7 @@ class SelfAnalysisStorage:
             try:
                 analysis = self._load_analysis_from_directory(child, include_deleted=False)
             except (FileNotFoundError, KeyError, json.JSONDecodeError, OSError, ValueError):
+                logger.debug("跳过无法读取的自我分析: %s", child.name)
                 continue
             if selected_type and selected_type != "全部" and analysis.analysis_type != selected_type:
                 continue
@@ -274,4 +278,5 @@ class SelfAnalysisStorage:
                 try:
                     child.unlink()
                 except OSError:
+                    logger.warning("无法删除未使用的图片: %s", child)
                     continue

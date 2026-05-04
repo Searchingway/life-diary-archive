@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "life-diary-archive"
-version = "0.2.0"
+version = "3.1.0"
 description = "Local-first diary, footprint, reading notes, and lightweight planning app."
 readme = "README.md"
 requires-python = ">=3.10"

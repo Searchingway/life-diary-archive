@@ -7,7 +7,10 @@ from typing import Iterable
 from uuid import uuid4
 
 from .book_storage import BookStorage
+from .logger import get_logger
 from .models import WorkEntry, WorkImage, WorkImageDraft, now_iso
+
+logger = get_logger('work_storage')
 
 
 WORK_TYPES = ["书籍", "电影", "动漫", "游戏", "文章", "视频", "课程", "其他"]
@@ -78,6 +81,7 @@ class WorkStorage:
             try:
                 work = self._load_work_from_directory(child, include_deleted=False)
             except (FileNotFoundError, KeyError, json.JSONDecodeError, OSError, ValueError):
+                logger.debug("跳过无法读取的作品感悟: %s", child.name)
                 continue
             if selected_type and selected_type != "全部" and work.work_type != selected_type:
                 continue
@@ -355,4 +359,5 @@ class WorkStorage:
                 try:
                     child.unlink()
                 except OSError:
+                    logger.warning("无法删除未使用的图片: %s", child)
                     continue

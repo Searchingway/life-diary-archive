@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Iterable
 from uuid import uuid4
 
+from .logger import get_logger
 from .models import BookEntry, BookImage, BookImageDraft, now_iso
+
+logger = get_logger('book_storage')
 
 
 class BookStorage:
@@ -51,6 +54,7 @@ class BookStorage:
             try:
                 book = self._load_book_from_directory(child, include_deleted=False)
             except (FileNotFoundError, KeyError, json.JSONDecodeError, OSError, ValueError):
+                logger.debug("跳过无法读取的读书笔记: %s", child.name)
                 continue
             if keyword and not self._matches_query(book, keyword):
                 continue
@@ -193,4 +197,5 @@ class BookStorage:
                 try:
                     child.unlink()
                 except OSError:
+                    logger.warning("无法删除未使用的图片: %s", child)
                     continue

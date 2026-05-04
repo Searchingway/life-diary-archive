@@ -127,6 +127,7 @@ class ObservationPage(AutoSaveMixin, QWidget):
         self.time_input.textChanged.connect(self._mark_dirty)
         self.emotion_combo = QComboBox(group)
         self.emotion_combo.addItems(OBSERVATION_EMOTIONS)
+        self.emotion_combo.currentTextChanged.connect(self._on_emotion_changed)
         self.emotion_combo.currentTextChanged.connect(self._mark_dirty)
         self.intensity_spin = QSpinBox(group)
         self.intensity_spin.setRange(1, 5)
@@ -134,8 +135,13 @@ class ObservationPage(AutoSaveMixin, QWidget):
         self.need_combo = QComboBox(group)
         self.need_combo.addItems(OBSERVATION_NEEDS)
         self.need_combo.currentTextChanged.connect(self._mark_dirty)
+        self.custom_emotion_input = QLineEdit(group)
+        self.custom_emotion_input.setPlaceholderText("请输入自定义情绪")
+        self.custom_emotion_input.textChanged.connect(self._mark_dirty)
+        self.custom_emotion_input.hide()
         form.addRow("时间", self.time_input)
         form.addRow("情绪", self.emotion_combo)
+        form.addRow("自定义情绪", self.custom_emotion_input)
         form.addRow("强度", self.intensity_spin)
         form.addRow("当前需要", self.need_combo)
         group_layout.addLayout(form)
@@ -196,17 +202,7 @@ class ObservationPage(AutoSaveMixin, QWidget):
         self.observation_list.blockSignals(False)
         self._show_status("已创建新的自我观察草稿。", 3000)
 
-    def save_observation(self) -> bool:
-        observation = self._read_form()
-        try:
-            saved = self.storage.save_observation(observation)
-        except Exception as exc:
-            QMessageBox.critical(self, "保存失败", f"保存自我观察时出错：\n{exc}")
-            return False
-        self._fill_form(saved)
-        self.refresh_observation_list(select_id=saved.id)
-        self._show_status("自我观察已保存。", 3000)
-        return True
+
 
     def reload_current_observation(self) -> None:
         if self.current_observation is None or not self.storage.observation_dir(self.current_observation.id).exists():
@@ -286,7 +282,15 @@ class ObservationPage(AutoSaveMixin, QWidget):
         self.current_observation = observation
         try:
             self.time_input.setText(observation.time)
-            self._set_combo_text(self.emotion_combo, observation.emotion)
+            emotion = observation.emotion
+            if emotion in OBSERVATION_EMOTIONS:
+                self._set_combo_text(self.emotion_combo, emotion)
+                self.custom_emotion_input.clear()
+                self.custom_emotion_input.hide()
+            else:
+                self._set_combo_text(self.emotion_combo, "其他")
+                self.custom_emotion_input.setText(emotion)
+                self.custom_emotion_input.show()
             self.intensity_spin.setValue(observation.intensity)
             self._set_combo_text(self.need_combo, observation.need)
             self.trigger_edit.setPlainText(observation.trigger)
@@ -300,13 +304,34 @@ class ObservationPage(AutoSaveMixin, QWidget):
         if self.current_observation is None:
             self.current_observation = self.storage.create_empty_observation()
         self.current_observation.time = self.time_input.text().strip()
-        self.current_observation.emotion = self.emotion_combo.currentText().strip() or "其他"
+        emotion = self.emotion_combo.currentText().strip() or "其他"
+        if emotion == "其他":
+            custom_emotion = self.custom_emotion_input.text().strip()
+            if custom_emotion:
+                emotion = custom_emotion
+        self.current_observation.emotion = emotion
         self.current_observation.intensity = self.intensity_spin.value()
         self.current_observation.need = self.need_combo.currentText().strip() or "其他"
         self.current_observation.trigger = self.trigger_edit.toPlainText()
         self.current_observation.body_sensation = self.body_edit.toPlainText()
         self.current_observation.notes = self.notes_edit.toPlainText()
         return self.current_observation
+
+    def save_observation(self) -> bool:
+        emotion = self.emotion_combo.currentText().strip()
+        if emotion == "其他" and not self.custom_emotion_input.text().strip():
+            QMessageBox.warning(self, "保存失败", "请填写自定义情绪，或选择一个预设的情绪选项")
+            return False
+        observation = self._read_form()
+        try:
+            saved = self.storage.save_observation(observation)
+        except Exception as exc:
+            QMessageBox.critical(self, "保存失败", f"保存自我观察时出错：\n{exc}")
+            return False
+        self._fill_form(saved)
+        self.refresh_observation_list(select_id=saved.id)
+        self._show_status("自我观察已保存。", 3000)
+        return True
 
     def _on_current_item_changed(self, current: QListWidgetItem | None, previous: QListWidgetItem | None) -> None:
         if current is None:
@@ -376,6 +401,13 @@ class ObservationPage(AutoSaveMixin, QWidget):
             or self.body_edit.toPlainText().strip()
             or self.notes_edit.toPlainText().strip()
         )
+
+    def _on_emotion_changed(self, emotion: str) -> None:
+        if emotion == "其他":
+            self.custom_emotion_input.show()
+        else:
+            self.custom_emotion_input.hide()
+            self.custom_emotion_input.clear()
 
     def _show_status(self, message: str, timeout: int = 3000) -> None:
         window = self.window()

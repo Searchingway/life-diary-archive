@@ -19,6 +19,7 @@ from .footprint_page import FootprintPage
 from .footprint_storage import FootprintStorage
 from .lesson_page import LessonPage
 from .lesson_storage import LessonStorage
+from .logger import get_logger
 from .observation_page import ObservationPage
 from .observation_storage import ObservationStorage
 from .overview import OverviewService
@@ -34,6 +35,9 @@ from .thought_page import ThoughtPage
 from .thought_storage import ThoughtStorage
 from .work_page import WorkPage
 from .work_storage import WorkStorage
+
+
+logger = get_logger('main_window')
 
 
 class DiaryMainWindow(QMainWindow):
@@ -64,7 +68,7 @@ class DiaryMainWindow(QMainWindow):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("人生档案 Diary Desktop 3.0 - 双端闭环与深度整理版")
+        self.setWindowTitle("人生档案 Diary Desktop 3.1 - 工程结构整理版")
         self.resize(1260, 840)
 
         self.tabs = QTabWidget(self)
@@ -212,8 +216,10 @@ class DiaryMainWindow(QMainWindow):
         try:
             backup_path = create_backup(self.diary_storage.root_dir, output_dir, APP_VERSION)
         except Exception as exc:
+            logger.exception("备份数据失败")
             QMessageBox.critical(self, "备份失败", f"备份数据时出错：\n{exc}")
             return
+        logger.info("备份完成: %s", backup_path)
         QMessageBox.information(self, "备份完成", f"备份文件已生成：\n\n{backup_path}")
         self.statusBar().showMessage("数据备份完成。", 5000)
 
@@ -252,10 +258,12 @@ class DiaryMainWindow(QMainWindow):
                 APP_VERSION,
             )
         except Exception as exc:
+            logger.exception("恢复备份失败: %s", zip_path)
             QMessageBox.critical(self, "恢复失败", f"恢复备份时出错：\n{exc}")
             return
 
         self._reload_data_after_restore()
+        logger.info("备份恢复完成: %s", zip_path)
         QMessageBox.information(
             self,
             "恢复完成",
@@ -303,10 +311,12 @@ class DiaryMainWindow(QMainWindow):
                 APP_VERSION,
             )
         except Exception as exc:
+            logger.exception("导入手机版数据包失败: %s", zip_path)
             QMessageBox.critical(self, "导入失败", f"导入手机版数据包时出错，当前数据已尽量恢复到导入前状态：\n{exc}")
             return
 
         self._reload_data_after_restore()
+        logger.info("手机版数据导入完成: %s", zip_path)
         QMessageBox.information(
             self,
             "导入完成",
