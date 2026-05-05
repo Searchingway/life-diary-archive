@@ -84,5 +84,9 @@ android/**/android-release.keystore
 
 # Ai
 run_claude_deepseek_flash.bat
-.claude
-.trae
+.claude/
+.trae/
+
+# 安装包
+电脑直装版/
+手机直装版/
