@@ -1,5 +1,19 @@
 # 技术债与重构计划
 
+## 已完成（Desktop 3.2）
+
+- [x] 新增信息备忘模块 `info_memo_storage.py` / `info_memo_page.py`
+- [x] 信息备忘支持接单记录、网课资源、通用信息三种类型，每类有专属字段和独立状态
+- [x] 信息备忘接入自动保存（AutoSaveMixin），自动保存不跳光标
+- [x] 顶部导航十二页签，信息备忘插入轻资源后、自我观察前
+- [x] 总览页时间线和模块统计已接入信息备忘
+- [x] `InfoMemoPage` 完整实现了 sidebar + editor 模式，使用 QStackedWidget 切换类型专属字段区域
+
+### 后续遗留问题
+
+1. **`InfoMemoPage` 没有类型转换按钮** — 不像 ThoughtPage 有「转成轻计划」、ResourcePage 有「转成轻计划 / 复制为教训反思」。信息备忘一期只做纯 CRUD，类型后续可根据需要添加一键转其他模块。
+2. **总览页点击信息备忘记录跳转正常** — 在 `_open_timeline_record` 中已添加 `info_memos` 路由分支。
+
 ## 已完成（Desktop 3.1）
 
 - [x] 日志系统补全：app.py 加入 sys.excepthook

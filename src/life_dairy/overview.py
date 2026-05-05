@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .book_storage import BookStorage
 from .footprint_storage import FootprintStorage
+from .info_memo_storage import InfoMemoStorage
 from .lesson_storage import LessonStorage
 from .observation_storage import ObservationStorage
 from .plan_storage import PlanStorage
@@ -56,6 +57,7 @@ class OverviewService:
         thought_storage: ThoughtStorage | None = None,
         resource_storage: ResourceStorage | None = None,
         observation_storage: ObservationStorage | None = None,
+        info_memo_storage: InfoMemoStorage | None = None,
     ):
         self.diary_storage = diary_storage
         self.footprint_storage = footprint_storage
@@ -67,6 +69,7 @@ class OverviewService:
         self.thought_storage = thought_storage
         self.resource_storage = resource_storage
         self.observation_storage = observation_storage
+        self.info_memo_storage = info_memo_storage
 
     def build_stats(self, today: date | None = None) -> OverviewStats:
         current = today or date.today()
@@ -111,6 +114,7 @@ class OverviewService:
         items.extend(self._thought_items())
         items.extend(self._resource_items())
         items.extend(self._observation_items())
+        items.extend(self._info_memo_items())
         items.sort(key=lambda item: (item.date or "", item.sort_key, item.title), reverse=True)
         return items[:limit]
 
@@ -125,6 +129,7 @@ class OverviewService:
             ("轻思考", self._safe_list(self.thought_storage.list_thoughts if self.thought_storage else None)),
             ("轻资源", self._safe_list(self.resource_storage.list_resources if self.resource_storage else None)),
             ("自我观察", self._safe_list(self.observation_storage.list_observations if self.observation_storage else None)),
+            ("信息备忘", self._safe_list(self.info_memo_storage.list_info_memos if self.info_memo_storage else None)),
         ]
         counts: dict[str, int] = {}
         latest: dict[str, str] = {}
@@ -261,6 +266,29 @@ class OverviewService:
             )
             for resource in self.resource_storage.list_resources()
         ]
+
+    def _info_memo_items(self) -> list[TimelineItem]:
+        if self.info_memo_storage is None:
+            return []
+        items = []
+        for memo in self.info_memo_storage.list_info_memos():
+            summary = memo.note or ""
+            if not summary and memo.type_fields:
+                tf = memo.type_fields
+                summary = str(tf.get("content", "") or tf.get("deliverables", "") or tf.get("reason", "") or "")
+            items.append(
+                TimelineItem(
+                    record_type="信息备忘",
+                    record_id=memo.id,
+                    date=self._date_from_iso(memo.updated_at),
+                    title=memo.display_title,
+                    summary=self._summary(summary),
+                    status=f"{memo.info_type} / {memo.status}",
+                    source_module="info_memos",
+                    sort_key=memo.updated_at,
+                ),
+            )
+        return items
 
     def _observation_items(self) -> list[TimelineItem]:
         if self.observation_storage is None:

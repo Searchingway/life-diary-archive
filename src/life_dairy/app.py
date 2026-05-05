@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication
 from . import __version__
 from .book_storage import BookStorage
 from .footprint_storage import FootprintStorage
+from .info_memo_storage import InfoMemoStorage
 from .lesson_storage import LessonStorage
 from .logger import get_logger, setup_logger
 from .main_window import DiaryMainWindow
@@ -45,6 +46,7 @@ def main() -> int:
         ThoughtStorage(data_dir),
         ResourceStorage(data_dir),
         ObservationStorage(data_dir),
+        InfoMemoStorage(data_dir),
     )
     window.show()
     return app.exec()

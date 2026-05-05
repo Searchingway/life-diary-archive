@@ -17,6 +17,8 @@ from .data_manager_page import DataManagerPage
 from .diary_page import DiaryPage
 from .footprint_page import FootprintPage
 from .footprint_storage import FootprintStorage
+from .info_memo_page import InfoMemoPage
+from .info_memo_storage import InfoMemoStorage
 from .lesson_page import LessonPage
 from .lesson_storage import LessonStorage
 from .logger import get_logger
@@ -53,6 +55,7 @@ class DiaryMainWindow(QMainWindow):
         thought_storage: ThoughtStorage | None = None,
         resource_storage: ResourceStorage | None = None,
         observation_storage: ObservationStorage | None = None,
+        info_memo_storage: InfoMemoStorage | None = None,
     ):
         super().__init__()
         self.diary_storage = diary_storage
@@ -65,10 +68,11 @@ class DiaryMainWindow(QMainWindow):
         self.thought_storage = thought_storage or ThoughtStorage(diary_storage.root_dir)
         self.resource_storage = resource_storage or ResourceStorage(diary_storage.root_dir)
         self.observation_storage = observation_storage or ObservationStorage(diary_storage.root_dir)
+        self.info_memo_storage = info_memo_storage or InfoMemoStorage(diary_storage.root_dir)
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("人生档案 Diary Desktop 3.1 - 工程结构整理版")
+        self.setWindowTitle("人生档案 Diary Desktop 3.2 - 信息备忘")
         self.resize(1260, 840)
 
         self.tabs = QTabWidget(self)
@@ -101,6 +105,7 @@ class DiaryMainWindow(QMainWindow):
             self.self_analysis_storage,
             self.tabs,
         )
+        self.info_memo_page = InfoMemoPage(self.info_memo_storage, self.tabs)
         self.data_manager_page = DataManagerPage(self.diary_storage.root_dir, self.tabs)
 
         self.tabs.addTab(self.overview_page, "总览")
@@ -109,6 +114,7 @@ class DiaryMainWindow(QMainWindow):
         self.tabs.addTab(self.plan_page, "轻计划")
         self.tabs.addTab(self.thought_page, "轻思考")
         self.tabs.addTab(self.resource_page, "轻资源")
+        self.tabs.addTab(self.info_memo_page, "信息备忘")
         self.tabs.addTab(self.observation_page, "自我观察")
         self.tabs.addTab(self.lesson_page, "教训与反思")
         self.tabs.addTab(self.self_analysis_page, "自我分析")
@@ -127,6 +133,7 @@ class DiaryMainWindow(QMainWindow):
         self.thought_page.dirty_state_changed.connect(self._update_tab_titles)
         self.resource_page.dirty_state_changed.connect(self._update_tab_titles)
         self.observation_page.dirty_state_changed.connect(self._update_tab_titles)
+        self.info_memo_page.dirty_state_changed.connect(self._update_tab_titles)
         self.diary_page.show_footprints_requested.connect(self._open_footprints_for_date)
         self.footprint_page.open_diary_requested.connect(self._open_diary_for_date)
         self.lesson_page.open_diary_requested.connect(self._open_diary_from_lesson)
@@ -191,17 +198,19 @@ class DiaryMainWindow(QMainWindow):
         thought_title = "轻思考 *" if self.thought_page.has_unsaved_changes() else "轻思考"
         resource_title = "轻资源 *" if self.resource_page.has_unsaved_changes() else "轻资源"
         observation_title = "自我观察 *" if self.observation_page.has_unsaved_changes() else "自我观察"
+        info_memo_title = "信息备忘 *" if self.info_memo_page.has_unsaved_changes() else "信息备忘"
         self.tabs.setTabText(0, "总览")
         self.tabs.setTabText(1, diary_title)
         self.tabs.setTabText(2, footprint_title)
         self.tabs.setTabText(3, plan_title)
         self.tabs.setTabText(4, thought_title)
         self.tabs.setTabText(5, resource_title)
-        self.tabs.setTabText(6, observation_title)
-        self.tabs.setTabText(7, lesson_title)
-        self.tabs.setTabText(8, self_analysis_title)
-        self.tabs.setTabText(9, work_title)
-        self.tabs.setTabText(10, "数据管理")
+        self.tabs.setTabText(6, info_memo_title)
+        self.tabs.setTabText(7, observation_title)
+        self.tabs.setTabText(8, lesson_title)
+        self.tabs.setTabText(9, self_analysis_title)
+        self.tabs.setTabText(10, work_title)
+        self.tabs.setTabText(11, "数据管理")
 
     def _backup_data(self) -> None:
         if not self._finish_all_pending_changes():
@@ -348,6 +357,7 @@ class DiaryMainWindow(QMainWindow):
             self.thought_page,
             self.resource_page,
             self.observation_page,
+            self.info_memo_page,
         )
 
     def _create_overview_service(self) -> OverviewService:
@@ -362,6 +372,7 @@ class DiaryMainWindow(QMainWindow):
             self.thought_storage,
             self.resource_storage,
             self.observation_storage,
+            self.info_memo_storage,
         )
 
     def _reload_data_after_restore(self) -> None:
@@ -376,6 +387,7 @@ class DiaryMainWindow(QMainWindow):
         self.thought_storage = ThoughtStorage(root_dir)
         self.resource_storage = ResourceStorage(root_dir)
         self.observation_storage = ObservationStorage(root_dir)
+        self.info_memo_storage = InfoMemoStorage(root_dir)
 
         self.diary_page.storage = self.diary_storage
         self.diary_page.footprint_storage = self.footprint_storage
@@ -397,6 +409,7 @@ class DiaryMainWindow(QMainWindow):
         self.resource_page.lesson_storage = self.lesson_storage
         self.observation_page.storage = self.observation_storage
         self.observation_page.self_analysis_storage = self.self_analysis_storage
+        self.info_memo_page.storage = self.info_memo_storage
         self.data_manager_page.set_data_root(root_dir)
         self.overview_page.service = self._create_overview_service()
 
@@ -430,6 +443,14 @@ class DiaryMainWindow(QMainWindow):
             "refresh_observation_list",
             "observation_list",
             "new_observation",
+        )
+        self._reset_page_after_restore(
+            self.info_memo_page,
+            "current_memo",
+            None,
+            "refresh_info_memo_list",
+            "memo_list",
+            "new_memo",
         )
         self.overview_page.refresh_overview()
         self._update_tab_titles()
@@ -608,6 +629,9 @@ class DiaryMainWindow(QMainWindow):
         elif source_module == "observations":
             self.observation_page.open_observation_by_id(record_id)
             self.tabs.setCurrentWidget(self.observation_page)
+        elif source_module == "info_memos":
+            self.info_memo_page.open_memo_by_id(record_id)
+            self.tabs.setCurrentWidget(self.info_memo_page)
 
     def _open_diary_from_relation(self, entry_id: str, target_date: str) -> None:
         if entry_id:
