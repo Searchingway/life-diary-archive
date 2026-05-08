@@ -216,8 +216,24 @@ finally {
                 if image.label.strip():
                     caption = document.add_paragraph(image.label.strip())
                     self._set_run_font(caption.runs, size=Pt(11), bold=True)
-                document.add_picture(str(image_path), width=Cm(15.5))
-                document.add_paragraph("")
+                    # Keep caption with the next paragraph (the image)
+                else:
+                    caption = None
+
+                # Add image, scaled to fit A4 width
+                img_para = document.add_paragraph()
+                try:
+                    doc_image = img_para.add_run().add_picture(str(image_path), width=Cm(15.5))
+                except Exception:
+                    img_para.add_run("（图片无法加载）")
+
+                # Set keep_with_next on the caption so it stays with the image
+                if caption is not None:
+                    self._set_keep_with_next(caption)
+                # Keep image lines together on one page
+                self._set_keep_lines(img_para)
+                # Keep image with the following paragraph
+                self._set_keep_with_next(img_para)
 
     def _build_base_name(self, export_items: list[DiaryExportItem]) -> str:
         if len(export_items) == 1:
@@ -262,3 +278,25 @@ finally {
             run.font.size = size
             run.bold = bold
             run._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+
+    def _set_keep_with_next(self, paragraph) -> None:
+        """Set keepWithNext on a paragraph to keep it on the same page as the next paragraph."""
+        pPr = paragraph._element.find(qn("w:pPr"))
+        if pPr is None:
+            pPr = paragraph._element.makeelement(qn("w:pPr"), {})
+            paragraph._element.insert(0, pPr)
+        keep = pPr.find(qn("w:keepNext"))
+        if keep is None:
+            keep = pPr.makeelement(qn("w:keepNext"), {})
+            pPr.append(keep)
+
+    def _set_keep_lines(self, paragraph) -> None:
+        """Set keepLines on a paragraph to keep all its lines on the same page."""
+        pPr = paragraph._element.find(qn("w:pPr"))
+        if pPr is None:
+            pPr = paragraph._element.makeelement(qn("w:pPr"), {})
+            paragraph._element.insert(0, pPr)
+        keep = pPr.find(qn("w:keepLines"))
+        if keep is None:
+            keep = pPr.makeelement(qn("w:keepLines"), {})
+            pPr.append(keep)

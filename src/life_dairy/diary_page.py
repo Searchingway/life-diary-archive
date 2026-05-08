@@ -34,7 +34,11 @@ from .exchange import ExchangePackageExporter
 from .footprint_storage import FootprintStorage
 from .models import DiaryEntry, DiaryImageDraft
 from .storage import DiaryStorage
-from .ui_helpers import make_scroll_area
+from .ui_helpers import (
+    DropTargetImageList,
+    add_image_reorder_buttons,
+    make_scroll_area,
+)
 
 
 class ExportRangeDialog(QDialog):
@@ -248,8 +252,9 @@ class DiaryPage(AutoSaveMixin, QWidget):
         image_group_layout = QHBoxLayout(image_group)
 
         image_left = QVBoxLayout()
-        self.image_list = QListWidget(image_group)
+        self.image_list = DropTargetImageList(image_group)
         self.image_list.currentItemChanged.connect(self._on_image_selection_changed)
+        self.image_list.files_dropped.connect(self._add_dropped_images)
 
         image_button_row = QHBoxLayout()
         self.open_image_button = QPushButton("打开所选图片", image_group)
@@ -257,6 +262,13 @@ class DiaryPage(AutoSaveMixin, QWidget):
 
         self.remove_image_button = QPushButton("移除所选图片", image_group)
         self.remove_image_button.clicked.connect(self.remove_selected_image)
+
+        add_image_reorder_buttons(
+            image_button_row,
+            self.image_list,
+            self.image_items,
+            self._on_images_reordered,
+        )
 
         image_button_row.addWidget(self.open_image_button)
         image_button_row.addWidget(self.remove_image_button)
@@ -357,6 +369,37 @@ class DiaryPage(AutoSaveMixin, QWidget):
         self._fill_form(saved)
         self._show_status("已保存到本地。", 3000)
         return True
+
+    def _add_dropped_images(self, paths: list[Path]) -> None:
+        existing: set[str] = set()
+        for image_item in self.image_items:
+            try:
+                existing.add(str(image_item.source_path.resolve()).lower())
+            except FileNotFoundError:
+                continue
+
+        added_count = 0
+        for path in paths:
+            try:
+                normalized = str(path.resolve()).lower()
+            except FileNotFoundError:
+                continue
+            if normalized in existing:
+                continue
+            self.image_items.append(DiaryImageDraft(source_path=path, label=""))
+            existing.add(normalized)
+            added_count += 1
+
+        if added_count == 0:
+            return
+
+        self._refresh_image_list(select_row=len(self.image_items) - 1)
+        self._mark_dirty()
+        self._show_status(f"已导入 {added_count} 张图片，保存后生效。", 3000)
+
+    def _on_images_reordered(self) -> None:
+        self._refresh_image_list(select_row=self.image_list.currentRow())
+        self._mark_dirty()
 
     def add_images(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(

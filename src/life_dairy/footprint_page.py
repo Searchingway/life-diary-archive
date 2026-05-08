@@ -27,7 +27,11 @@ from .exchange import ExchangePackageExporter
 from .footprint_storage import FootprintStorage
 from .models import FootprintImageDraft, FootprintPlace, FootprintVisit
 from .storage import DiaryStorage
-from .ui_helpers import make_scroll_area
+from .ui_helpers import (
+    DropTargetImageList,
+    add_image_reorder_buttons,
+    make_scroll_area,
+)
 
 
 class FootprintPage(AutoSaveMixin, QWidget):
@@ -263,8 +267,9 @@ class FootprintPage(AutoSaveMixin, QWidget):
         layout = QHBoxLayout(group)
 
         left = QVBoxLayout()
-        self.place_image_list = QListWidget(group)
+        self.place_image_list = DropTargetImageList(group)
         self.place_image_list.currentItemChanged.connect(self._on_place_image_selection_changed)
+        self.place_image_list.files_dropped.connect(self._add_dropped_place_images)
 
         button_row = QHBoxLayout()
         self.add_place_image_button = QPushButton("添加地点图片", group)
@@ -274,7 +279,13 @@ class FootprintPage(AutoSaveMixin, QWidget):
         self.remove_place_image_button = QPushButton("移除所选图片", group)
         self.remove_place_image_button.clicked.connect(self.remove_selected_place_image)
 
-        button_row.addWidget(self.add_place_image_button)
+        add_image_reorder_buttons(
+            button_row,
+            self.place_image_list,
+            self.place_image_items,
+            self._on_place_images_reordered,
+        )
+
         button_row.addWidget(self.open_place_image_button)
         button_row.addWidget(self.remove_place_image_button)
 
@@ -302,8 +313,9 @@ class FootprintPage(AutoSaveMixin, QWidget):
         layout = QHBoxLayout(group)
 
         left = QVBoxLayout()
-        self.visit_image_list = QListWidget(group)
+        self.visit_image_list = DropTargetImageList(group)
         self.visit_image_list.currentItemChanged.connect(self._on_visit_image_selection_changed)
+        self.visit_image_list.files_dropped.connect(self._add_dropped_visit_images)
 
         button_row = QHBoxLayout()
         self.add_visit_image_button = QPushButton("添加当天图片", group)
@@ -313,7 +325,13 @@ class FootprintPage(AutoSaveMixin, QWidget):
         self.remove_visit_image_button = QPushButton("移除所选图片", group)
         self.remove_visit_image_button.clicked.connect(self.remove_selected_visit_image)
 
-        button_row.addWidget(self.add_visit_image_button)
+        add_image_reorder_buttons(
+            button_row,
+            self.visit_image_list,
+            self._current_visit_image_items(),
+            self._on_visit_images_reordered,
+        )
+
         button_row.addWidget(self.open_visit_image_button)
         button_row.addWidget(self.remove_visit_image_button)
 
@@ -530,6 +548,35 @@ class FootprintPage(AutoSaveMixin, QWidget):
         self._refresh_place_image_list(select_row=len(self.place_image_items) - 1)
         self._mark_dirty()
         self._show_status(f"已加入 {added_count} 张地点图片，保存后生效。", 3000)
+
+    def _add_dropped_place_images(self, paths: list[Path]) -> None:
+        added_count = self._add_images_from_paths(self.place_image_items, paths)
+        if added_count == 0:
+            return
+        self._refresh_place_image_list(select_row=len(self.place_image_items) - 1)
+        self._mark_dirty()
+        self._show_status(f"已导入 {added_count} 张地点图片，保存后生效。", 3000)
+
+    def _add_dropped_visit_images(self, paths: list[Path]) -> None:
+        visit = self._current_visit()
+        if visit is None:
+            QMessageBox.information(self, "先选日期关联", "请先新增或选择一个日期关联。")
+            return
+        items = self._current_visit_image_items()
+        added_count = self._add_images_from_paths(items, paths)
+        if added_count == 0:
+            return
+        self._refresh_visit_image_list(select_row=len(items) - 1)
+        self._mark_dirty()
+        self._show_status(f"已导入 {added_count} 张当天图片，保存后生效。", 3000)
+
+    def _on_place_images_reordered(self) -> None:
+        self._refresh_place_image_list(select_row=self.place_image_list.currentRow())
+        self._mark_dirty()
+
+    def _on_visit_images_reordered(self) -> None:
+        self._refresh_visit_image_list(select_row=self.visit_image_list.currentRow())
+        self._mark_dirty()
 
     def add_visit_images(self) -> None:
         visit = self._current_visit()
@@ -863,6 +910,27 @@ class FootprintPage(AutoSaveMixin, QWidget):
         items[row].label = normalized
         self._refresh_visit_image_list(select_row=row)
         self._mark_dirty()
+
+    @staticmethod
+    def _add_images_from_paths(target_items: list[FootprintImageDraft], paths: list[Path]) -> int:
+        existing: set[str] = set()
+        for image_item in target_items:
+            try:
+                existing.add(str(image_item.source_path.resolve()).lower())
+            except FileNotFoundError:
+                continue
+        added_count = 0
+        for path in paths:
+            try:
+                normalized = str(path.resolve()).lower()
+            except FileNotFoundError:
+                continue
+            if normalized in existing:
+                continue
+            target_items.append(FootprintImageDraft(source_path=path, label=""))
+            existing.add(normalized)
+            added_count += 1
+        return added_count
 
     def _add_images(self, target_items: list[FootprintImageDraft]) -> int:
         files, _ = QFileDialog.getOpenFileNames(

@@ -3,7 +3,6 @@ from __future__ import annotations
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -34,6 +33,7 @@ from .info_memo_storage import (
     STATUS_MAP,
     InfoMemoEntry,
     InfoMemoStorage,
+    _parse_amount,
 )
 from .ui_helpers import make_scroll_area
 
@@ -202,24 +202,18 @@ class InfoMemoPage(AutoSaveMixin, QWidget):
         self.order_duration_input.setSuffix(" 天")
         self.order_duration_input.setSpecialValueText("未设置")
         self.order_duration_input.valueChanged.connect(self._mark_dirty)
-        self.order_price_input = QDoubleSpinBox(page)
-        self.order_price_input.setRange(0, 99999999)
-        self.order_price_input.setPrefix("¥ ")
-        self.order_price_input.setDecimals(2)
-        self.order_price_input.setSpecialValueText("未设置")
-        self.order_price_input.valueChanged.connect(self._mark_dirty)
-        self.order_deposit_input = QDoubleSpinBox(page)
-        self.order_deposit_input.setRange(0, 99999999)
-        self.order_deposit_input.setPrefix("¥ ")
-        self.order_deposit_input.setDecimals(2)
-        self.order_deposit_input.setSpecialValueText("未设置")
-        self.order_deposit_input.valueChanged.connect(self._mark_dirty)
-        self.order_final_payment_input = QDoubleSpinBox(page)
-        self.order_final_payment_input.setRange(0, 99999999)
-        self.order_final_payment_input.setPrefix("¥ ")
-        self.order_final_payment_input.setDecimals(2)
-        self.order_final_payment_input.setSpecialValueText("未设置")
-        self.order_final_payment_input.valueChanged.connect(self._mark_dirty)
+        self.order_price_input = QLineEdit(page)
+        self.order_price_input.setPlaceholderText("输入金额，如 800")
+        self.order_price_input.textChanged.connect(self._on_order_price_or_deposit_changed)
+        self.order_price_input.textChanged.connect(self._mark_dirty)
+        self.order_deposit_input = QLineEdit(page)
+        self.order_deposit_input.setPlaceholderText("默认为 0")
+        self.order_deposit_input.textChanged.connect(self._on_order_price_or_deposit_changed)
+        self.order_deposit_input.textChanged.connect(self._mark_dirty)
+        self.order_final_payment_input = QLineEdit(page)
+        self.order_final_payment_input.setPlaceholderText("自动计算：报价 - 定金")
+        self.order_final_payment_input.setReadOnly(True)
+        self.order_final_payment_input.setStyleSheet("background: #f5f5f5;")
         self.order_deliverables_edit = QTextEdit(page)
         self.order_deliverables_edit.setPlaceholderText("交付内容说明")
         self.order_deliverables_edit.setMinimumHeight(80)
@@ -231,11 +225,28 @@ class InfoMemoPage(AutoSaveMixin, QWidget):
         layout.addRow("接单日期", self.order_date_input)
         layout.addRow("截止日期", self.order_deadline_input)
         layout.addRow("工期天数", self.order_duration_input)
-        layout.addRow("报价", self.order_price_input)
-        layout.addRow("定金", self.order_deposit_input)
-        layout.addRow("尾款", self.order_final_payment_input)
+        layout.addRow("报价 (¥)", self.order_price_input)
+        layout.addRow("定金 (¥)", self.order_deposit_input)
+        layout.addRow("尾款 (¥)", self.order_final_payment_input)
         layout.addRow("交付内容", self.order_deliverables_edit)
         return page
+
+    def _format_amount(self, value: float | str) -> str:
+        try:
+            return f"{float(value):.2f}"
+        except (ValueError, TypeError):
+            return "0.00"
+
+    def _update_final_payment(self) -> None:
+        price = _parse_amount(self.order_price_input.text())
+        deposit = _parse_amount(self.order_deposit_input.text())
+        final_payment = round(max(0, price - deposit), 2)
+        self.order_final_payment_input.setText(self._format_amount(final_payment))
+
+    def _on_order_price_or_deposit_changed(self, *_args) -> None:
+        if self._is_loading_form:
+            return
+        self._update_final_payment()
 
     def _build_course_form(self) -> QWidget:
         page = QWidget(self)
@@ -462,9 +473,9 @@ class InfoMemoPage(AutoSaveMixin, QWidget):
             self.order_date_input.setText(tf.get("order_date", ""))
             self.order_deadline_input.setText(tf.get("deadline", ""))
             self.order_duration_input.setValue(int(tf.get("duration_days", 0)))
-            self.order_price_input.setValue(float(tf.get("price", 0)))
-            self.order_deposit_input.setValue(float(tf.get("deposit", 0)))
-            self.order_final_payment_input.setValue(float(tf.get("final_payment", 0)))
+            self.order_price_input.setText(self._format_amount(tf.get("price", 0)))
+            self.order_deposit_input.setText(self._format_amount(tf.get("deposit", 0)))
+            self._update_final_payment()
             self.order_deliverables_edit.setPlainText(tf.get("deliverables", ""))
         elif memo.info_type == "网课资源":
             self.course_name_input.setText(tf.get("course_name", ""))
@@ -507,9 +518,12 @@ class InfoMemoPage(AutoSaveMixin, QWidget):
             tf["order_date"] = self.order_date_input.text().strip()
             tf["deadline"] = self.order_deadline_input.text().strip()
             tf["duration_days"] = self.order_duration_input.value()
-            tf["price"] = self.order_price_input.value()
-            tf["deposit"] = self.order_deposit_input.value()
-            tf["final_payment"] = self.order_final_payment_input.value()
+            price = _parse_amount(self.order_price_input.text())
+            deposit = _parse_amount(self.order_deposit_input.text())
+            final_payment = round(max(0, price - deposit), 2)
+            tf["price"] = price
+            tf["deposit"] = deposit
+            tf["final_payment"] = final_payment
             tf["deliverables"] = self.order_deliverables_edit.toPlainText().strip()
         elif info_type == "网课资源":
             tf["course_name"] = self.course_name_input.text().strip()

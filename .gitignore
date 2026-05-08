@@ -83,7 +83,7 @@ android/**/android-build/
 android/**/android-release.keystore
 
 # Ai
-run_claude_deepseek_flash.bat
+scripts/personal/run_claude_deepseek_flash.bat
 .claude/
 .trae/
 

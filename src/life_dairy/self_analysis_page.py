@@ -35,7 +35,11 @@ from .models import (
 )
 from .self_analysis_storage import SELF_ANALYSIS_TYPES, SelfAnalysisStorage
 from .storage import DiaryStorage
-from .ui_helpers import make_scroll_area
+from .ui_helpers import (
+    DropTargetImageList,
+    add_image_reorder_buttons,
+    make_scroll_area,
+)
 
 
 class LessonPickerDialog(QDialog):
@@ -305,8 +309,9 @@ class SelfAnalysisPage(AutoSaveMixin, QWidget):
         group = QGroupBox("图片 / 截图", self)
         layout = QHBoxLayout(group)
         left = QVBoxLayout()
-        self.image_list = QListWidget(group)
+        self.image_list = DropTargetImageList(group)
         self.image_list.currentItemChanged.connect(self._on_image_selection_changed)
+        self.image_list.files_dropped.connect(self._add_dropped_images)
         button_row = QHBoxLayout()
         self.add_image_button = QPushButton("添加图片", group)
         self.add_image_button.clicked.connect(self.add_images)
@@ -314,6 +319,14 @@ class SelfAnalysisPage(AutoSaveMixin, QWidget):
         self.open_image_button.clicked.connect(self.open_selected_image)
         self.remove_image_button = QPushButton("移除图片", group)
         self.remove_image_button.clicked.connect(self.remove_selected_image)
+
+        add_image_reorder_buttons(
+            button_row,
+            self.image_list,
+            self.image_items,
+            self._on_images_reordered,
+        )
+
         button_row.addWidget(self.add_image_button)
         button_row.addWidget(self.open_image_button)
         button_row.addWidget(self.remove_image_button)
@@ -498,6 +511,28 @@ class SelfAnalysisPage(AutoSaveMixin, QWidget):
         relation = self._current_related_lesson()
         if relation is not None:
             self.open_lesson_requested.emit(relation.lesson_id)
+
+    def _add_dropped_images(self, paths: list[Path]) -> None:
+        existing = {str(item.source_path.resolve()).lower() for item in self.image_items if item.source_path.exists()}
+        added_count = 0
+        for path in paths:
+            if not path.exists():
+                continue
+            normalized = str(path.resolve()).lower()
+            if normalized in existing:
+                continue
+            self.image_items.append(SelfAnalysisImageDraft(source_path=path, label=""))
+            existing.add(normalized)
+            added_count += 1
+        if added_count == 0:
+            return
+        self._refresh_image_list(select_row=len(self.image_items) - 1)
+        self._mark_dirty()
+        self._show_status(f"已导入 {added_count} 张图片，保存后生效。", 3000)
+
+    def _on_images_reordered(self) -> None:
+        self._refresh_image_list(select_row=self.image_list.currentRow())
+        self._mark_dirty()
 
     def add_images(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(

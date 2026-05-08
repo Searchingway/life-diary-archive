@@ -32,19 +32,35 @@ ApplicationWindow {
     }
 
     header: ToolBar {
-        height: 56
+        height: 62
+        topPadding: 10
+        bottomPadding: 4
         background: Rectangle { color: "#FFFFFF" }
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 10
-            anchors.rightMargin: 18
-            spacing: 8
+            anchors.leftMargin: 8
+            anchors.rightMargin: 16
+            spacing: 6
 
             ToolButton {
                 visible: stack.depth > 1
                 text: "‹"
-                font.pixelSize: 26
+                font.pixelSize: 28
+                font.weight: Font.Bold
+                implicitWidth: 44
+                implicitHeight: 44
+                contentItem: Text {
+                    text: "‹"
+                    font: parent.font
+                    color: "#1A3A24"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    radius: 22
+                    color: "#DCEBD8"
+                }
                 onClicked: stack.pop()
             }
 

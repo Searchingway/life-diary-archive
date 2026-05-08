@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -39,6 +41,7 @@ class ObservationPage(AutoSaveMixin, QWidget):
         self.storage = storage
         self.self_analysis_storage = self_analysis_storage
         self.current_observation: ObservationEntry | None = None
+        self._original_observation_time = ""
         self.is_dirty = False
         self._is_loading_form = False
         self._build_ui()
@@ -123,7 +126,7 @@ class ObservationPage(AutoSaveMixin, QWidget):
         group_layout = QVBoxLayout(group)
         form = QFormLayout()
         self.time_input = QLineEdit(group)
-        self.time_input.setPlaceholderText("观察时间，例如 2026-05-02T20:30:00+08:00")
+        self.time_input.setPlaceholderText("观察时间，自动记录")
         self.time_input.textChanged.connect(self._mark_dirty)
         self.emotion_combo = QComboBox(group)
         self.emotion_combo.addItems(OBSERVATION_EMOTIONS)
@@ -280,8 +283,9 @@ class ObservationPage(AutoSaveMixin, QWidget):
     def _fill_form(self, observation: ObservationEntry) -> None:
         self._is_loading_form = True
         self.current_observation = observation
+        self._original_observation_time = observation.time
         try:
-            self.time_input.setText(observation.time)
+            self.time_input.setText(self._format_time_display(observation.time))
             emotion = observation.emotion
             if emotion in OBSERVATION_EMOTIONS:
                 self._set_combo_text(self.emotion_combo, emotion)
@@ -303,7 +307,12 @@ class ObservationPage(AutoSaveMixin, QWidget):
     def _read_form(self) -> ObservationEntry:
         if self.current_observation is None:
             self.current_observation = self.storage.create_empty_observation()
-        self.current_observation.time = self.time_input.text().strip()
+        # Preserve original ISO time if the user hasn't changed the display field
+        display_text = self.time_input.text().strip()
+        if self._original_observation_time and display_text == self._format_time_display(self._original_observation_time):
+            self.current_observation.time = self._original_observation_time
+        else:
+            self.current_observation.time = display_text
         emotion = self.emotion_combo.currentText().strip() or "其他"
         if emotion == "其他":
             custom_emotion = self.custom_emotion_input.text().strip()
@@ -358,8 +367,19 @@ class ObservationPage(AutoSaveMixin, QWidget):
             self.new_observation()
         self._show_status(status_message, 3000)
 
+    @staticmethod
+    def _format_time_display(iso_time: str) -> str:
+        """Convert ISO time string to user-friendly display format."""
+        if not iso_time:
+            return ""
+        try:
+            dt = datetime.fromisoformat(iso_time)
+            return dt.strftime("%Y-%m-%d %H:%M")
+        except (ValueError, TypeError):
+            return iso_time
+
     def _build_list_text(self, observation: ObservationEntry) -> str:
-        return f"{observation.date} | {observation.display_title}\n{observation.trigger or observation.need}"
+        return f"{self._format_time_display(observation.time)} | {observation.display_title}\n{observation.trigger or observation.need}"
 
     def _set_combo_text(self, combo: QComboBox, text: str) -> None:
         index = combo.findText(text)

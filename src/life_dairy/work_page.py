@@ -29,7 +29,11 @@ from .book_page import DiaryPickerDialog
 from .models import WorkEntry, WorkImageDraft, WorkRelatedDiary, WorkRelatedSelfAnalysis
 from .self_analysis_storage import SelfAnalysisStorage
 from .storage import DiaryStorage
-from .ui_helpers import make_scroll_area
+from .ui_helpers import (
+    DropTargetImageList,
+    add_image_reorder_buttons,
+    make_scroll_area,
+)
 from .work_storage import WORK_STATUSES, WORK_TYPES, WorkStorage
 
 
@@ -247,6 +251,21 @@ class WorkPage(AutoSaveMixin, QWidget):
             info_layout.addWidget(QLabel(label, info_group))
             info_layout.addWidget(edit)
 
+        # Hide 摘录/片段 section — data is preserved for backward compatibility
+        self.section_edits["summary"].setVisible(False)
+        # Find and hide the label for summary too
+        for i in range(info_layout.count()):
+            w = info_layout.itemAt(i).widget()
+            if w is not None and w is self.section_edits["summary"]:
+                # The label is just before this widget
+                label_w = info_layout.itemAt(i - 1).widget()
+                if label_w is not None:
+                    label_w.setVisible(False)
+                break
+
+        # Enlarge 我的感悟
+        self.section_edits["final_review"].setMinimumHeight(300)
+
         lower_splitter = QSplitter(Qt.Orientation.Horizontal, widget)
         lower_splitter.setMinimumHeight(320)
         lower_splitter.addWidget(self._build_image_group())
@@ -317,8 +336,9 @@ class WorkPage(AutoSaveMixin, QWidget):
         group = QGroupBox("图片 / 海报", self)
         layout = QHBoxLayout(group)
         left = QVBoxLayout()
-        self.image_list = QListWidget(group)
+        self.image_list = DropTargetImageList(group)
         self.image_list.currentItemChanged.connect(self._on_image_selection_changed)
+        self.image_list.files_dropped.connect(self._add_dropped_images)
         button_row = QHBoxLayout()
         self.add_image_button = QPushButton("添加图片", group)
         self.add_image_button.clicked.connect(self.add_images)
@@ -326,7 +346,14 @@ class WorkPage(AutoSaveMixin, QWidget):
         self.open_image_button.clicked.connect(self.open_selected_image)
         self.remove_image_button = QPushButton("移除图片", group)
         self.remove_image_button.clicked.connect(self.remove_selected_image)
-        button_row.addWidget(self.add_image_button)
+
+        add_image_reorder_buttons(
+            button_row,
+            self.image_list,
+            self.image_items,
+            self._on_images_reordered,
+        )
+
         button_row.addWidget(self.open_image_button)
         button_row.addWidget(self.remove_image_button)
         self.image_label_input = QLineEdit(group)
@@ -523,6 +550,28 @@ class WorkPage(AutoSaveMixin, QWidget):
         relation = self._current_related_self_analysis()
         if relation is not None:
             self.open_self_analysis_requested.emit(relation.analysis_id)
+
+    def _add_dropped_images(self, paths: list[Path]) -> None:
+        existing = {str(item.source_path.resolve()).lower() for item in self.image_items if item.source_path.exists()}
+        added_count = 0
+        for path in paths:
+            if not path.exists():
+                continue
+            normalized = str(path.resolve()).lower()
+            if normalized in existing:
+                continue
+            self.image_items.append(WorkImageDraft(source_path=path, label=""))
+            existing.add(normalized)
+            added_count += 1
+        if added_count == 0:
+            return
+        self._refresh_image_list(select_row=len(self.image_items) - 1)
+        self._mark_dirty()
+        self._show_status(f"已导入 {added_count} 张图片，保存后生效。", 3000)
+
+    def _on_images_reordered(self) -> None:
+        self._refresh_image_list(select_row=self.image_list.currentRow())
+        self._mark_dirty()
 
     def add_images(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(

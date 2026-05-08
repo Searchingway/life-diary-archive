@@ -12,6 +12,6 @@ set CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
 set CLAUDE_CODE_EFFORT_LEVEL=high
 
 cd /d "%~dp0"
-claude
+claude --permission-mode bypassPermissions
 
 pause

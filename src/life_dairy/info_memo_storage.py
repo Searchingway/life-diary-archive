@@ -41,6 +41,20 @@ DEFAULT_STATUS: dict[str, str] = {
 }
 
 
+def _parse_amount(text: str) -> float:
+    """Parse a user-entered amount string to float.
+
+    Returns 0.0 for empty or invalid input.
+    """
+    text = text.strip().replace("¥", "").replace("￥", "").replace(",", "").replace("，", "")
+    if not text:
+        return 0.0
+    try:
+        return round(float(text), 2)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def default_type_fields(info_type: str) -> dict[str, Any]:
     if info_type == "接单记录":
         return {

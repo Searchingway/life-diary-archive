@@ -69,7 +69,7 @@ dist\LifeDiary\
 
 1. **启动测试**：双击 `dist\LifeDiary\LifeDiary.exe` 验证能正常启动
 
-2. **功能测试**：按 TEST_CHECKLIST.md 进行功能验证
+2. **功能测试**：按 docs/test/TEST_CHECKLIST.md 进行功能验证
 
 3. **检查依赖**：
    - PySide6 插件目录存在
@@ -163,7 +163,7 @@ e:\code\life\diary\packaging\windows\dist\LifeDiary-3.0.1-portable.zip
 - [ ] 无缺少 DLL 警告
 
 ### 测试完成
-- [ ] 已按 TEST_CHECKLIST.md 完成所有测试
+- [ ] 已按 docs/test/TEST_CHECKLIST.md 完成所有测试
 - [ ] 无已知严重问题
 - [ ] 数据兼容性验证通过
 

@@ -29,7 +29,11 @@ from .book_page import DiaryPickerDialog
 from .lesson_storage import LESSON_CATEGORIES, LESSON_SEVERITIES, LessonStorage
 from .models import LessonEntry, LessonImageDraft, LessonRelatedDiary
 from .storage import DiaryStorage
-from .ui_helpers import make_scroll_area
+from .ui_helpers import (
+    DropTargetImageList,
+    add_image_reorder_buttons,
+    make_scroll_area,
+)
 
 
 class LessonPage(AutoSaveMixin, QWidget):
@@ -237,8 +241,9 @@ class LessonPage(AutoSaveMixin, QWidget):
         layout = QHBoxLayout(group)
 
         left = QVBoxLayout()
-        self.image_list = QListWidget(group)
+        self.image_list = DropTargetImageList(group)
         self.image_list.currentItemChanged.connect(self._on_image_selection_changed)
+        self.image_list.files_dropped.connect(self._add_dropped_images)
 
         button_row = QHBoxLayout()
         self.add_image_button = QPushButton("添加图片", group)
@@ -247,6 +252,14 @@ class LessonPage(AutoSaveMixin, QWidget):
         self.open_image_button.clicked.connect(self.open_selected_image)
         self.remove_image_button = QPushButton("移除图片", group)
         self.remove_image_button.clicked.connect(self.remove_selected_image)
+
+        add_image_reorder_buttons(
+            button_row,
+            self.image_list,
+            self.image_items,
+            self._on_images_reordered,
+        )
+
         button_row.addWidget(self.add_image_button)
         button_row.addWidget(self.open_image_button)
         button_row.addWidget(self.remove_image_button)
@@ -428,6 +441,37 @@ class LessonPage(AutoSaveMixin, QWidget):
         if relation is None:
             return
         self.open_diary_requested.emit(relation.entry_id, relation.date)
+
+    def _add_dropped_images(self, paths: list[Path]) -> None:
+        existing: set[str] = set()
+        for image_item in self.image_items:
+            try:
+                existing.add(str(image_item.source_path.resolve()).lower())
+            except FileNotFoundError:
+                continue
+
+        added_count = 0
+        for path in paths:
+            try:
+                normalized = str(path.resolve()).lower()
+            except FileNotFoundError:
+                continue
+            if normalized in existing:
+                continue
+            self.image_items.append(LessonImageDraft(source_path=path, label=""))
+            existing.add(normalized)
+            added_count += 1
+
+        if added_count == 0:
+            return
+
+        self._refresh_image_list(select_row=len(self.image_items) - 1)
+        self._mark_dirty()
+        self._show_status(f"已导入 {added_count} 张图片，保存后生效。", 3000)
+
+    def _on_images_reordered(self) -> None:
+        self._refresh_image_list(select_row=self.image_list.currentRow())
+        self._mark_dirty()
 
     def add_images(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(

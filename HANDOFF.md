@@ -9,7 +9,7 @@
 |------|------|
 | `src/life_dairy/info_memo_storage.py` | 信息备忘存储层：`InfoMemoEntry` 数据类 + `InfoMemoStorage` 存储类，遵循 `thought_storage.py` 的单 JSON 模式 |
 | `src/life_dairy/info_memo_page.py` | 信息备忘页面：`InfoMemoPage`（AutoSaveMixin, QWidget），sidebar + editor 布局，QStackedWidget 切换三种类型专属字段 |
-| `docs/05_测试清单.md` | 新增测试清单，覆盖 CRUD、搜索、筛选、导航、自动保存、兼容性 |
+| `docs/test/05_测试清单.md` | 新增测试清单，覆盖 CRUD、搜索、筛选、导航、自动保存、兼容性 |
 
 ### 修改文件
 | 文件 | 说明 |
@@ -88,7 +88,7 @@
 
 ## 实际运行了哪些测试
 
-目前为人工验证清单（docs/05_测试清单.md）。待补充自动化测试。
+目前为人工验证清单（docs/test/05_测试清单.md）。待补充自动化测试。
 
 ## 当前风险
 
@@ -117,6 +117,6 @@
 - 类型筛选和状态筛选联动
 - 接入自动保存，不跳光标
 - 版本号 3.1.0 → 3.2.0
-- 新增 docs/05_测试清单.md
+- 新增 docs/test/05_测试清单.md
 - 更新 README、HANDOFF、TODO、tech_debt_plan
 ```

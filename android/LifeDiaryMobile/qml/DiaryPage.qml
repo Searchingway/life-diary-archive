@@ -132,7 +132,7 @@ Page {
                     width: diaryList.width
                     title: modelData.displayTitle
                     subtitle: modelData.date
-                    meta: modelData.body
+                    meta: modelData.body ? (modelData.body.length > 50 ? modelData.body.substring(0, 50) + "…" : modelData.body) : ""
                     selected: modelData.id === currentId
                     onClicked: loadEntry(modelData.id)
                 }
