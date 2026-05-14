@@ -59,6 +59,9 @@ class BackupServiceTests(unittest.TestCase):
             manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
 
         self.assertEqual("LifeDiaryBackup", manifest["backup_type"])
+        self.assertEqual("LifeDiary", manifest["app"])
+        self.assertEqual("1.0", manifest["format_version"])
+        self.assertEqual("Desktop", manifest["platform"])
         self.assertEqual("2.5", manifest["app_version"])
         self.assertIn("manifest.json", names)
         self.assertIn("Diary/", names)
@@ -67,6 +70,12 @@ class BackupServiceTests(unittest.TestCase):
         self.assertTrue(any(name.startswith("Diary/books/") for name in names))
         self.assertTrue(any(name.startswith("Diary/plans/") for name in names))
         self.assertTrue(any(name.startswith("Diary/lessons/") for name in names))
+        # 统一格式：modules 为列表字典
+        self.assertIsInstance(manifest["modules"], list)
+        if manifest["modules"]:
+            self.assertIsInstance(manifest["modules"][0], dict)
+            self.assertIn("key", manifest["modules"][0])
+            self.assertIn("title", manifest["modules"][0])
 
     def test_validate_backup_accepts_legal_backup(self) -> None:
         zip_path = create_backup(self.data_root, self.backup_dir, "2.5")

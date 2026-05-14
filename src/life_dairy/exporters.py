@@ -45,6 +45,7 @@ class DiaryExporter:
         self,
         export_items: list[DiaryExportItem],
         progress: ProgressCallback | None = None,
+        export_all: bool = False,
     ) -> tuple[Path, Path]:
         if not export_items:
             raise ValueError("没有可导出的日记")
@@ -52,12 +53,13 @@ class DiaryExporter:
         ordered_items = sorted(
             export_items,
             key=lambda item: (item.entry.date, item.entry.created_at, item.entry.updated_at),
+            reverse=True,
         )
 
         callback = progress or (lambda _value, _message: None)
         callback(5, "准备导出路径")
 
-        base_name = self._build_base_name(ordered_items)
+        base_name = self._build_base_name(ordered_items, export_all=export_all)
         docx_path = self._unique_path(self.export_root / f"{base_name}.docx")
         pdf_path = self._unique_path(self.export_root / f"{base_name}.pdf")
 
@@ -235,8 +237,10 @@ finally {
                 # Keep image with the following paragraph
                 self._set_keep_with_next(img_para)
 
-    def _build_base_name(self, export_items: list[DiaryExportItem]) -> str:
-        if len(export_items) == 1:
+    def _build_base_name(self, export_items: list[DiaryExportItem], export_all: bool = False) -> str:
+        if export_all:
+            raw = f"全部日记_{len(export_items)}篇日记"
+        elif len(export_items) == 1:
             raw = f"{export_items[0].entry.date}_{export_items[0].entry.display_title}"
         else:
             start_date = export_items[0].entry.date

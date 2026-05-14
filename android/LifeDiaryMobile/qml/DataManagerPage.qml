@@ -17,11 +17,70 @@ Page {
         modules = overview.modules || []
     }
 
-    Component.onCompleted: refresh()
+    function checkPendingImport() {
+        var path = archiveStore.checkPendingImport()
+        if (path !== "") {
+            console.log("DataManagerPage: pending import detected:", path)
+            importConfirmDialog.pendingPath = path
+            importConfirmDialog.open()
+        }
+    }
+
+    Component.onCompleted: {
+        refresh()
+        checkPendingImport()
+    }
 
     Connections {
         target: archiveStore
         function onDataChanged() { refresh() }
+    }
+
+    // 导入确认对话框（来自微信/QQ 的 ZIP）
+    Dialog {
+        id: importConfirmDialog
+        property string pendingPath: ""
+        title: "导入数据包"
+        standardButtons: Dialog.Yes | Dialog.No
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 3)
+
+        Label {
+            text: "检测到来自其他应用的数据包，是否导入？\n导入前会自动备份当前数据，不会覆盖已有数据。"
+            wrapMode: Text.Wrap
+            width: 280
+        }
+
+        onAccepted: {
+            var url = Qt.urlFromLocalFile(importConfirmDialog.pendingPath)
+            if (archiveStore.importBackupPackage(url)) {
+                importResultDialog.text = "导入成功！\n建议重启 App 后查看全部数据。"
+            } else {
+                importResultDialog.text = "导入失败：" + archiveStore.lastError
+            }
+            importResultDialog.open()
+            refresh()
+        }
+    }
+
+    // 导入结果提示
+    Dialog {
+        id: importResultDialog
+        property string text: ""
+        title: "导入结果"
+        standardButtons: Dialog.Ok
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 3)
+
+        Label {
+            text: importResultDialog.text
+            wrapMode: Text.Wrap
+            width: 280
+        }
     }
 
     FileDialog {

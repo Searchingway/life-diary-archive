@@ -72,14 +72,19 @@ def create_backup(
     zip_path = _unique_backup_path(output_dir / f"{filename_prefix}_{timestamp}.zip")
     modules = _discover_modules(data_root)
 
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     manifest = {
         "backup_type": BACKUP_TYPE,
+        "app": "LifeDiary",
+        "format_version": "1.0",
+        "platform": "Desktop",
         "app_name": "人生档案 Diary",
         "backup_version": "1.0",
         "app_version": app_version,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "created_at": now_str,
+        "backup_time": now_str,
         "data_root": "Diary",
-        "modules": modules,
+        "modules": [{"key": m, "title": MODULE_LABELS.get(m, m), "folder": f"{m}/"} for m in modules],
     }
 
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -129,9 +134,14 @@ def validate_backup(zip_path: Path | str) -> tuple[bool, str]:
                 logger.warning("备份包 manifest.json 无法解析: %s", zip_path)
                 return False, "manifest.json 无法读取或不是合法 JSON"
 
-            if manifest.get("backup_type") != BACKUP_TYPE:
-                logger.warning("备份包 backup_type 不匹配: %s", zip_path)
-                return False, "manifest.json 中 backup_type 不正确"
+            # 兼容旧版 backup_type 和新版 format_version + app
+            is_valid_format = (
+                manifest.get("backup_type") == BACKUP_TYPE
+                or (manifest.get("format_version") == "1.0" and manifest.get("app") == "LifeDiary")
+            )
+            if not is_valid_format:
+                logger.warning("备份包 manifest 格式不匹配: %s", zip_path)
+                return False, "manifest.json 格式不正确（需要 LifeDiary 格式）"
 
             if not any(name == "Diary/" or name.startswith("Diary/") for name in names):
                 logger.warning("备份包缺少 Diary/ 目录: %s", zip_path)

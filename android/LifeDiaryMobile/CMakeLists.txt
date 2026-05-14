@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LifeDiaryMobile VERSION 1.5.0 LANGUAGES CXX)
+project(LifeDiaryMobile VERSION 1.6.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Quick QuickControls2 QuickDialogs2 Qml)
+find_package(ZLIB REQUIRED)
 
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
@@ -44,6 +45,7 @@ target_link_libraries(LifeDiaryMobile
         Qt6::QuickControls2
         Qt6::QuickDialogs2
         Qt6::Qml
+        ZLIB::ZLIB
 )
 
 if(ANDROID)

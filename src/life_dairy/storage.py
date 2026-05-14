@@ -69,7 +69,7 @@ class DiaryStorage:
             for entry in self.list_entries()
             if start_date <= entry.date <= end_date
         ]
-        items.sort(key=lambda entry: (entry.date, entry.created_at, entry.updated_at))
+        items.sort(key=lambda entry: (entry.date, entry.created_at, entry.updated_at), reverse=True)
         return items
 
     def list_entries_by_date(self, target_date: str) -> list[DiaryEntry]:

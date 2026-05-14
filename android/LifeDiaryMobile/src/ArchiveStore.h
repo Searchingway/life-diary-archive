@@ -85,6 +85,7 @@ public:
     Q_INVOKABLE QString exportFullBackup(bool forShare = false);
     Q_INVOKABLE bool exportAndShareBackup();
     Q_INVOKABLE bool importBackupPackage(const QUrl &sourceUrl);
+    Q_INVOKABLE QString checkPendingImport();
 
 signals:
     void dataChanged();

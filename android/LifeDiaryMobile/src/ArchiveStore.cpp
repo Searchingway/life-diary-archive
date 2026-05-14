@@ -23,6 +23,8 @@
 #include <QJniObject>
 #endif
 
+#include <zlib.h>
+
 #include <algorithm>
 
 namespace {
@@ -35,6 +37,7 @@ QString cleanTitle(const QString &value, const QString &fallback)
 struct ZipEntry {
     QString name;
     QByteArray data;
+    QByteArray compressedData;
     quint32 crc = 0;
     quint32 localOffset = 0;
     quint16 modTime = 0;
@@ -118,34 +121,50 @@ bool writeZipFile(const QString &zipPath, QList<ZipEntry> entries)
         entry.modTime = modTime;
         entry.modDate = modDate;
 
+        // 用 DEFLATE 压缩数据
+        if (!entry.data.isEmpty()) {
+            uLongf destLen = compressBound(uLong(entry.data.size()));
+            entry.compressedData.resize(int(destLen));
+            if (compress(reinterpret_cast<Bytef*>(entry.compressedData.data()), &destLen,
+                         reinterpret_cast<const Bytef*>(entry.data.data()), uLong(entry.data.size())) == Z_OK) {
+                entry.compressedData.resize(int(destLen));
+            } else {
+                entry.compressedData.clear();
+            }
+        }
+
+        const QByteArray &fileData = entry.compressedData.isEmpty() ? entry.data : entry.compressedData;
+        const quint16 method = entry.compressedData.isEmpty() ? 0 : 8;
         const QByteArray name = entry.name.toUtf8();
         appendUInt32(&output, 0x04034b50U);
         appendUInt16(&output, 20);
         appendUInt16(&output, 0);
-        appendUInt16(&output, 0);
+        appendUInt16(&output, method);
         appendUInt16(&output, entry.modTime);
         appendUInt16(&output, entry.modDate);
         appendUInt32(&output, entry.crc);
-        appendUInt32(&output, quint32(entry.data.size()));
+        appendUInt32(&output, quint32(fileData.size()));
         appendUInt32(&output, quint32(entry.data.size()));
         appendUInt16(&output, quint16(name.size()));
         appendUInt16(&output, 0);
         output.append(name);
-        output.append(entry.data);
+        output.append(fileData);
     }
 
     const quint32 centralOffset = quint32(output.size());
     for (const ZipEntry &entry : entries) {
+        const QByteArray &fileData = entry.compressedData.isEmpty() ? entry.data : entry.compressedData;
+        const quint16 method = entry.compressedData.isEmpty() ? 0 : 8;
         const QByteArray name = entry.name.toUtf8();
         appendUInt32(&output, 0x02014b50U);
         appendUInt16(&output, 20);
         appendUInt16(&output, 20);
         appendUInt16(&output, 0);
-        appendUInt16(&output, 0);
+        appendUInt16(&output, method);
         appendUInt16(&output, entry.modTime);
         appendUInt16(&output, entry.modDate);
         appendUInt32(&output, entry.crc);
-        appendUInt32(&output, quint32(entry.data.size()));
+        appendUInt32(&output, quint32(fileData.size()));
         appendUInt32(&output, quint32(entry.data.size()));
         appendUInt16(&output, quint16(name.size()));
         appendUInt16(&output, 0);
@@ -244,13 +263,29 @@ bool readStoredZipFile(const QString &zipPath, QList<ReadZipEntry> *entries)
         if (nameOffset + nameLength > data.size() || nextOffset > data.size()) {
             return false;
         }
-        if (method != 0 || compressedSize != uncompressedSize) {
+
+        QByteArray entryData;
+        if (method == 0) {
+            if (compressedSize != uncompressedSize) {
+                return false;
+            }
+            entryData = data.mid(dataOffset, int(uncompressedSize));
+        } else if (method == 8) {
+            const QByteArray raw = data.mid(dataOffset, int(compressedSize));
+            uLongf destLen = uncompressedSize;
+            entryData.resize(int(destLen));
+            if (uncompress(reinterpret_cast<Bytef*>(entryData.data()), &destLen,
+                           reinterpret_cast<const Bytef*>(raw.data()), raw.size()) != Z_OK) {
+                return false;
+            }
+            entryData.resize(int(destLen));
+        } else {
             return false;
         }
 
         const QString name = cleanZipName(QString::fromUtf8(data.mid(nameOffset, nameLength)));
         if (!name.isEmpty() && !name.endsWith(QLatin1Char('/'))) {
-            entries->append({name, data.mid(dataOffset, int(uncompressedSize))});
+            entries->append({name, entryData});
         }
         offset = nextOffset;
     }
@@ -1401,6 +1436,11 @@ QVariantMap ArchiveStore::dataOverview() const
     appendModule(QStringLiteral("thoughts"), QStringLiteral("轻思考"), countRecords(thoughtsPath(), QStringLiteral("thought.json")), QStringLiteral("thoughts/"));
     appendModule(QStringLiteral("resources"), QStringLiteral("轻资源"), countRecords(resourcesPath(), QStringLiteral("resource.json")), QStringLiteral("resources/"));
     appendModule(QStringLiteral("observations"), QStringLiteral("自我观察"), countRecords(observationsPath(), QStringLiteral("observation.json")), QStringLiteral("observations/"));
+    // 兼容桌面端导出的附加模块
+    appendModule(QStringLiteral("lessons"), QStringLiteral("教训与反思"), countRecords(QDir(m_root).filePath(QStringLiteral("lessons")), QStringLiteral("lesson.json")), QStringLiteral("lessons/"));
+    appendModule(QStringLiteral("self_analysis"), QStringLiteral("自我分析"), countRecords(QDir(m_root).filePath(QStringLiteral("self_analysis")), QStringLiteral("analysis.json")), QStringLiteral("self_analysis/"));
+    appendModule(QStringLiteral("works"), QStringLiteral("作品感悟"), countRecords(QDir(m_root).filePath(QStringLiteral("works")), QStringLiteral("work.json")), QStringLiteral("works/"));
+    appendModule(QStringLiteral("info_memos"), QStringLiteral("信息备忘"), countRecords(QDir(m_root).filePath(QStringLiteral("info_memos")), QStringLiteral("memo.json")), QStringLiteral("info_memos/"));
 
     QVariantMap result;
     result.insert(QStringLiteral("dataRoot"), dataRoot());
@@ -1468,14 +1508,49 @@ bool ArchiveStore::exportAndShareBackup()
     return true;
 }
 
+QString ArchiveStore::checkPendingImport()
+{
+#ifdef Q_OS_ANDROID
+    const QString path = QJniObject::callStaticObjectMethod(
+        "com/localfirst/lifediary/LifeDiaryActivity",
+        "getPendingImportPath",
+        "()Ljava/lang/String;").toString();
+    if (!path.isEmpty()) {
+        qInfo() << "Pending import detected:" << path;
+        QFileInfo info(path);
+        qInfo() << "Pending import file exists:" << info.exists() << "size:" << info.size();
+    }
+    return path;
+#else
+    return {};
+#endif
+}
+
 bool ArchiveStore::importBackupPackage(const QUrl &sourceUrl)
 {
     clearError();
-    const QString sourcePath = localPathFromUrl(sourceUrl);
+    QString sourcePath = localPathFromUrl(sourceUrl);
+    if (sourcePath.isEmpty() || !QFileInfo::exists(sourcePath)) {
+#ifdef Q_OS_ANDROID
+        // 尝试通过 ContentResolver 复制 content:// URI
+        const QString uriStr = sourceUrl.toString();
+        if (uriStr.startsWith(QStringLiteral("content://"))) {
+            sourcePath = QJniObject::callStaticObjectMethod(
+                "com/localfirst/lifediary/LifeDiaryActivity",
+                "copyContentUriToTemp",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                QJniObject::fromString(uriStr).object<jstring>()).toString();
+        }
+#endif
+    }
     if (sourcePath.isEmpty() || !QFileInfo::exists(sourcePath)) {
         setError(QStringLiteral("请选择本机可读取的 ZIP 数据包"));
         return false;
     }
+
+    qInfo() << "Importing ZIP:" << sourcePath;
+    QFileInfo zipInfo(sourcePath);
+    qInfo() << "ZIP size:" << zipInfo.size();
 
     QString tempDiaryPath;
     QStringList topLevelFolders;
@@ -1489,6 +1564,7 @@ bool ArchiveStore::importBackupPackage(const QUrl &sourceUrl)
         setError(QStringLiteral("导入前自动备份失败，已停止导入"));
         return false;
     }
+    qInfo() << "Auto-backup before import:" << safetyPath;
 
     const QStringList allowedFolders = {
         QStringLiteral("entries"),
@@ -1528,7 +1604,17 @@ bool ArchiveStore::importBackupPackage(const QUrl &sourceUrl)
         }
     }
 
-    setToast(QStringLiteral("导入成功，建议重启 App 后查看全部数据"));
+    int importedCount = 0;
+    for (const QString &folder : allowedFolders) {
+        const QString targetFolder = QDir(m_root).filePath(folder);
+        if (QDir(targetFolder).exists()) {
+            importedCount += QDir(targetFolder).entryList(QDir::Dirs | QDir::NoDotAndDotDot).count();
+        }
+    }
+    qInfo() << "Import completed successfully. Total imported folders:" << importedCount
+            << "Modules:" << topLevelFolders
+            << "Safety backup:" << safetyPath;
+    setToast(QStringLiteral("导入成功，已导入 %1 个模块的数据").arg(topLevelFolders.size()));
     emit dataChanged();
     return true;
 }
@@ -2235,12 +2321,11 @@ bool ArchiveStore::addFullBackupEntries(const QString &zipPath, bool forShare, Q
 
     QVariantMap manifest;
     manifest.insert(QStringLiteral("app"), QStringLiteral("LifeDiary"));
-    manifest.insert(QStringLiteral("platform"), QStringLiteral("Android Qt/QML"));
-    manifest.insert(QStringLiteral("backup_time"), QDateTime::currentDateTime().toString(Qt::ISODateWithMs));
-    manifest.insert(QStringLiteral("version"), QStringLiteral("Mobile 1.5"));
+    manifest.insert(QStringLiteral("format_version"), QStringLiteral("1.0"));
+    manifest.insert(QStringLiteral("platform"), QStringLiteral("Android"));
+    manifest.insert(QStringLiteral("app_version"), QStringLiteral("Mobile 1.6"));
+    manifest.insert(QStringLiteral("backup_time"), QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
     manifest.insert(QStringLiteral("modules"), moduleList);
-    manifest.insert(QStringLiteral("data_directory"), QStringLiteral("Diary"));
-    manifest.insert(QStringLiteral("share_ready"), forShare);
 
     entries.prepend({
         QStringLiteral("manifest.json"),
@@ -2255,6 +2340,8 @@ bool ArchiveStore::addFullBackupEntries(const QString &zipPath, bool forShare, Q
         setError(QStringLiteral("完整数据包导出失败"));
         return false;
     }
+
+    qInfo() << "Full backup ZIP created:" << zipPath << "size:" << QFileInfo(zipPath).size();
 
     if (displayPath) {
         *displayPath = QDir::toNativeSeparators(zipPath);
@@ -2331,8 +2418,12 @@ bool ArchiveStore::extractBackupToTemp(const QString &zipPath, QString *tempDiar
         }
     }
     if (!hasManifest && !hasDiaryFolder) {
+        qInfo() << "extractBackupToTemp: invalid ZIP, no manifest or Diary folder found";
         return false;
     }
+
+    qInfo() << "extractBackupToTemp: hasManifest=" << hasManifest << "hasDiaryFolder=" << hasDiaryFolder
+            << "entries=" << entries.size();
 
     const QString tempRoot = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
         .filePath(QStringLiteral("life_diary_import_%1").arg(newId()));

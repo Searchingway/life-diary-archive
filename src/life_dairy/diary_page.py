@@ -7,6 +7,7 @@ from PySide6.QtCore import QDate, QSignalBlocker, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDateEdit,
     QDialog,
     QDialogButtonBox,
@@ -49,11 +50,11 @@ class ExportRangeDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("选择导出时间范围")
-        self.resize(360, 160)
+        self.resize(360, 200)
 
         layout = QVBoxLayout(self)
 
-        note = QLabel("选择开始和结束日期。导出时会按旧日期在前排序，每篇日记另起一页。", self)
+        note = QLabel("选择开始和结束日期。导出时会按新日期在前排序，每篇日记另起一页。", self)
         note.setWordWrap(True)
 
         form = QFormLayout()
@@ -70,6 +71,9 @@ class ExportRangeDialog(QDialog):
         form.addRow("开始日期", self.start_date_edit)
         form.addRow("结束日期", self.end_date_edit)
 
+        self.export_all_cb = QCheckBox("导出全部日记（忽略日期范围）", self)
+        self.export_all_cb.toggled.connect(self._on_export_all_toggled)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=self,
@@ -79,10 +83,19 @@ class ExportRangeDialog(QDialog):
 
         layout.addWidget(note)
         layout.addLayout(form)
+        layout.addWidget(self.export_all_cb)
         layout.addWidget(buttons)
 
+    def _on_export_all_toggled(self, checked: bool) -> None:
+        self.start_date_edit.setEnabled(not checked)
+        self.end_date_edit.setEnabled(not checked)
+
+    @property
+    def export_all(self) -> bool:
+        return self.export_all_cb.isChecked()
+
     def accept(self) -> None:  # type: ignore[override]
-        if self.start_date_edit.date() > self.end_date_edit.date():
+        if not self.export_all and self.start_date_edit.date() > self.end_date_edit.date():
             QMessageBox.warning(self, "日期范围无效", "开始日期不能晚于结束日期。")
             return
         super().accept()
@@ -493,7 +506,7 @@ class DiaryPage(AutoSaveMixin, QWidget):
             return
 
         self.current_entry = None
-        self.image_items = []
+        self.image_items[:] = []
         self._set_dirty(False)
         self.refresh_list()
 
@@ -538,7 +551,10 @@ class DiaryPage(AutoSaveMixin, QWidget):
 
         start_date = range_dialog.start_date_edit.date().toString("yyyy-MM-dd")
         end_date = range_dialog.end_date_edit.date().toString("yyyy-MM-dd")
-        export_entries = self.storage.list_entries_in_date_range(start_date, end_date)
+        if range_dialog.export_all:
+            export_entries = available_entries
+        else:
+            export_entries = self.storage.list_entries_in_date_range(start_date, end_date)
         if not export_entries:
             QMessageBox.information(self, "没有匹配日记", "所选时间范围内没有可导出的日记。")
             return
@@ -572,6 +588,7 @@ class DiaryPage(AutoSaveMixin, QWidget):
             docx_path, pdf_path = exporter.export_entries_word_and_pdf(
                 export_items,
                 progress=update_progress,
+                export_all=range_dialog.export_all,
             )
         except Exception as exc:
             progress.close()
@@ -644,7 +661,7 @@ class DiaryPage(AutoSaveMixin, QWidget):
             self.date_edit.setDate(date_value)
             self.title_input.setText(entry.title)
             self.body_edit.setPlainText(entry.body)
-            self.image_items = [
+            self.image_items[:] = [
                 DiaryImageDraft(
                     source_path=self.storage.resolve_image_path(entry.id, image.file_name),
                     label=image.label,
@@ -675,13 +692,12 @@ class DiaryPage(AutoSaveMixin, QWidget):
 
         self.current_entry = entry
         self._fill_form(entry)
-        self.refresh_list(select_id=entry.id)
         if status_message:
             self._show_status(status_message, 3000)
 
     def _discard_current_draft(self, status_message: str) -> None:
         self.current_entry = None
-        self.image_items = []
+        self.image_items[:] = []
         self._set_dirty(False)
         self.refresh_list()
 

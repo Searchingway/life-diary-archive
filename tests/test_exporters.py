@@ -95,7 +95,7 @@ class DiaryExporterTests(unittest.TestCase):
         self.assertNotIn("创建时间：", text)
         self.assertNotIn("更新时间：", text)
         self.assertIn("封面图", text)
-        self.assertLess(text.find("第一篇"), text.find("第二篇"))
+        self.assertGreater(text.find("第一篇"), text.find("第二篇"))
         self.assertNotIn("cover.png", text)
         self.assertNotIn("street.png", text)
 
