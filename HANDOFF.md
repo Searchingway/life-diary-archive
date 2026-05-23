@@ -120,3 +120,65 @@
 - 新增 docs/test/05_测试清单.md
 - 更新 README、HANDOFF、TODO、tech_debt_plan
 ```
+
+---
+
+## Round 1 工程整理（重构前准备）
+
+### 修改了哪些文件
+
+| 文件 | 说明 |
+|------|------|
+| `电脑直装版/specs/人生档案.spec` | 标记为 DEPRECATED，hiddenimports/binaries 不完整 |
+| `src/life_dairy/main_window.py` | 窗口标题改为读取 `__version__`，消除硬编码 |
+| `android/.../AndroidManifest.xml` | `allowBackup="true"` → `"false"`，本地优先隐私设计 |
+| `pyproject.toml` | 版本号 3.1.0 → 3.2.0，与 `__init__.py` 一致 |
+| `docs/release/BUILD_RELEASE.md` | 版本号 3.0.1 → 3.2.0，写明唯一推荐打包入口 |
+| `docs/test/TEST_CHECKLIST.md` | 版本号 3.0.1 → 3.2.0 |
+| `README.md` | 描述从 "Desktop 3.1 工程结构整理版" 更新为 "Desktop 3.2" |
+| `docs/dev-notes/tech_debt_plan.md` | 补充 Round 1 完成事项 |
+
+### 验收结果
+
+- [x] 唯一正式打包入口：`packaging/windows/LifeDiary.spec`
+- [x] 窗口标题：`人生档案 Diary Desktop 3.2.0 - 信息备忘`
+- [x] `allowBackup="false"`
+- [x] 全部 14 个测试文件通过（运行 `python -m pytest tests/ -v --tb=short`）
+- [x] 源码能正常启动
+
+### 当前风险
+
+| 风险 | 等级 | 说明 |
+|------|------|------|
+| 旧 spec 仍存在于项目中 | 低 | 已标记 DEPRECATED，不可删除以免破坏已有构建脚本 |
+| 版本号一致 | 低 | `__init__.py`、`pyproject.toml`、文档已同步为 3.2.0 |
+
+### Round 2 计划
+
+- 抽取 `image_utils.py`：将 7 个 Storage 中的 `_sync_images` / `_copy_image` / `_unique_name` / `_prune_unused_images` 合并到公共工具类
+
+---
+
+## 笔记功能（新增）
+
+### 新增文件
+| 文件 | 说明 |
+|------|------|
+| `src/life_dairy/note_storage.py` | 笔记存储层：`NoteEntry` 数据类 + `NoteStorage` CRUD，单 JSON 文件存储 |
+| `src/life_dairy/note_page.py` | 笔记页面：`NotePage(AutoSaveMixin, QWidget)`，sidebar + editor 布局 |
+| `tests/test_note_storage.py` | 存储层测试 11 项：to_dict/from_dict、CRUD、搜索、软删除 |
+| `tests/test_note_page.py` | UI 测试 15 项：初始化、表单填充/读取、脏状态、保存/删除、自动保存、搜索 |
+
+### 修改文件
+| 文件 | 说明 |
+|------|------|
+| `src/life_dairy/main_window.py` | 导入 NotePage + NoteStorage，新增 note_page 页签（索引 6），更新所有集成点 |
+| `src/life_dairy/overview.py` | 导入 NoteStorage，新增 notes 模块统计和时间线项 |
+| `src/life_dairy/app.py` | 导入 NoteStorage，传入 DiaryMainWindow |
+| `TODO` | 新增笔记条目 |
+| `docs/test/05_测试清单.md` | 新增笔记功能测试项 |
+
+### 数据存储
+- **目录**：`data/Diary/notes/{uuid}/note.json`
+- **字段**：id, title, description, body, created_at, updated_at
+- **软删除**：与现有模块一致

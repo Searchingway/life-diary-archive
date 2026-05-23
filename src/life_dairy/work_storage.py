@@ -100,14 +100,9 @@ class WorkStorage:
                 continue
             items.append(work)
 
-        items.sort(
-            key=lambda item: (
-                item.finish_date or item.start_date,
-                item.updated_at,
-                item.created_at,
-            ),
-            reverse=True,
-        )
+        status_order = {"进行中": 0, "暂停": 1, "想看": 2, "已完成": 3}
+        items.sort(key=lambda item: (item.finish_date or item.start_date, item.updated_at, item.created_at), reverse=True)
+        items.sort(key=lambda item: status_order.get(item.status, 9))
         return items
 
     def save_work(

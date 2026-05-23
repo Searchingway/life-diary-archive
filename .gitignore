@@ -84,6 +84,8 @@ android/**/android-release.keystore
 
 # Ai
 scripts/personal/run_claude_deepseek_flash.bat
+run_claude_deepseek_flash.bat
+run_claude_deepseek_pro.bat
 .claude/
 .trae/
 

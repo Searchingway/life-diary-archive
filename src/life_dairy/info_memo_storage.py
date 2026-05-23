@@ -192,7 +192,18 @@ class InfoMemoStorage:
             if keyword and not self._matches_query(memo, keyword):
                 continue
             items.append(memo)
-        items.sort(key=lambda item: (item.updated_at, item.created_at), reverse=True)
+        STATUS_SORT_ORDER = {
+            "接单记录": {"进行中": 0, "已接单": 1, "待验收": 2, "已交付": 3, "沟通中": 4, "已结款": 5, "已取消": 6},
+            "网课资源": {"学习中": 0, "暂停": 1, "想看": 2, "已收藏": 3, "已学完": 4, "放弃": 5},
+            "通用信息": {"处理中": 0, "未处理": 1, "已记录": 2, "已完成": 3, "已归档": 4},
+        }
+        PRIORITY_ORDER = {"高": 0, "中": 1, "低": 2}
+        items.sort(key=lambda item: item.updated_at, reverse=True)
+        items.sort(key=lambda item: (
+            STATUS_SORT_ORDER.get(item.info_type, {}).get(item.status, 99),
+            PRIORITY_ORDER.get(item.priority, 9),
+            item.type_fields.get("deadline", "") or "9999-99-99",
+        ))
         return items
 
     def load_memo(self, memo_id: str) -> InfoMemoEntry:

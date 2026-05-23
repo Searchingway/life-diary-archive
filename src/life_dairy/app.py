@@ -10,6 +10,7 @@ from .book_storage import BookStorage
 from .footprint_storage import FootprintStorage
 from .info_memo_storage import InfoMemoStorage
 from .lesson_storage import LessonStorage
+from .note_storage import NoteStorage
 from .logger import get_logger, setup_logger
 from .main_window import DiaryMainWindow
 from .observation_storage import ObservationStorage
@@ -47,6 +48,7 @@ def main() -> int:
         ResourceStorage(data_dir),
         ObservationStorage(data_dir),
         InfoMemoStorage(data_dir),
+        NoteStorage(data_dir),
     )
     window.show()
     return app.exec()

@@ -65,13 +65,13 @@ class PlanStorage:
             items.append(item)
 
         status_order = {"进行中": 0, "未开始": 1, "搁置": 2, "已完成": 3}
-        items.sort(
-            key=lambda item: (
-                status_order.get(item.status, 9),
-                item.due_date or "9999-99-99",
-                item.updated_at,
-            ),
-        )
+        priority_order = {"高": 0, "普通": 1, "低": 2}
+        items.sort(key=lambda item: item.updated_at)
+        items.sort(key=lambda item: (
+            status_order.get(item.status, 9),
+            priority_order.get(item.priority, 9),
+            item.due_date or "9999-99-99",
+        ))
         return items
 
     def save_plan(self, plan: PlanItem) -> PlanItem:

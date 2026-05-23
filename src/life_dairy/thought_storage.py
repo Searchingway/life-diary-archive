@@ -117,7 +117,9 @@ class ThoughtStorage:
             if keyword and not self._matches_query(thought, keyword):
                 continue
             items.append(thought)
-        items.sort(key=lambda item: (item.updated_at, item.created_at), reverse=True)
+        status_order = {"思考中": 0, "暂时搁置": 1, "已有结论": 2, "已转计划": 3}
+        items.sort(key=lambda item: item.updated_at, reverse=True)
+        items.sort(key=lambda item: status_order.get(item.status, 99))
         return items
 
     def load_thought(self, thought_id: str) -> ThoughtEntry:

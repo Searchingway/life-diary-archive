@@ -1,6 +1,6 @@
 # 人生档案 Diary Desktop 构建发布指南
 
-## Desktop 3.0.1 工程稳定性修复版
+## Desktop 3.2.0
 
 本文档提供「人生档案 Diary Desktop」的构建和发布流程说明。
 
@@ -40,12 +40,14 @@ python -m life_dairy.app
 
 ## 二、PyInstaller 打包
 
-### 2.1 打包命令
+### 2.1 打包命令（唯一推荐入口）
 
 ```bash
 cd e:\code\life\diary\packaging\windows
 pyinstaller LifeDiary.spec --clean
 ```
+
+> **注意**：`电脑直装版/specs/人生档案.spec` 已被标记为 DEPRECATED，其 hiddenimports 和 binaries 配置不完整。请始终使用 `packaging/windows/LifeDiary.spec`。
 
 ### 2.2 输出目录
 
@@ -134,13 +136,13 @@ lxml._elementpath
 
 ```bash
 cd e:\code\life\diary\packaging\windows\dist
-powershell Compress-Archive -Path LifeDiary -DestinationPath LifeDiary-3.0.1-portable.zip -Force
+powershell Compress-Archive -Path LifeDiary -DestinationPath LifeDiary-3.2.0-portable.zip -Force
 ```
 
 ### 4.2 输出文件
 
 ```
-e:\code\life\diary\packaging\windows\dist\LifeDiary-3.0.1-portable.zip
+e:\code\life\diary\packaging\windows\dist\LifeDiary-3.2.0-portable.zip
 ```
 
 ---
@@ -175,7 +177,7 @@ e:\code\life\diary\packaging\windows\dist\LifeDiary-3.0.1-portable.zip
 
 ```bash
 cd e:\code\life\diary\packaging\windows\dist
-powershell Get-FileHash LifeDiary-3.0.1-portable.zip -Algorithm SHA256 | Format-List
+powershell Get-FileHash LifeDiary-3.2.0-portable.zip -Algorithm SHA256 | Format-List
 ```
 
 输出示例：
@@ -191,7 +193,7 @@ Path      : LifeDiary-3.0.1-portable.zip
 下载后运行：
 
 ```bash
-powershell Get-FileHash .\LifeDiary-3.0.1-portable.zip -Algorithm SHA256
+powershell Get-FileHash .\LifeDiary-3.2.0-portable.zip -Algorithm SHA256
 ```
 
 对比哈希值确认文件完整性。
@@ -229,6 +231,7 @@ powershell Get-FileHash .\LifeDiary-3.0.1-portable.zip -Algorithm SHA256
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 3.2.0 | 2026-05-14 | 新增信息备忘模块、工程整理 Round 1（统一 spec / 版本号 / allowBackup） |
 | 3.0.1 | 2026-05-03 | 工程稳定性修复版：修复自动保存静默失败、完善打包配置、添加日志系统 |
 | 3.0.0 | - | 初始版本 |
 

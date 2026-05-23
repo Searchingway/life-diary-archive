@@ -125,7 +125,9 @@ class ResourceStorage:
             if keyword and not self._matches_query(resource, keyword):
                 continue
             items.append(resource)
-        items.sort(key=lambda item: (item.updated_at, item.created_at), reverse=True)
+        status_order = {"考虑中": 0, "已决定": 1, "已完成": 2, "已放弃": 3}
+        items.sort(key=lambda item: item.updated_at, reverse=True)
+        items.sort(key=lambda item: status_order.get(item.status, 99))
         return items
 
     def load_resource(self, resource_id: str) -> ResourceEntry:

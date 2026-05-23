@@ -29,6 +29,13 @@
 
 ## 后续重构计划（按优先级排列）
 
+### Round 1 已完成（工程整理）
+
+- [x] **统一 PyInstaller spec**：`电脑直装版/specs/人生档案.spec` 标记为 DEPRECATED，唯一正式入口为 `packaging/windows/LifeDiary.spec`。更新 `BUILD_RELEASE.md` 写明唯一推荐打包命令。
+- [x] **统一桌面端版本显示**：`main_window.py` 窗口标题改为读取 `__version__`（当前 3.2.0），消除硬编码。`pyproject.toml` 版本同步为 3.2.0。README / TEST_CHECKLIST / BUILD_RELEASE 版本号同步更新。
+- [x] **Android allowBackup 修正**：`AndroidManifest.xml` 中 `allowBackup="true"` → `"false"`，符合本地优先隐私设计。
+- [x] **文档同步**：更新 `HANDOFF.md`、`tech_debt_plan.md` 记录 Round 1 完成事项。
+
 ### 1. 抽取 image_utils.py（低风险，高收益）
 
 当前 6 个 Storage 类（DiaryStorage、FootprintStorage、BookStorage、LessonStorage、SelfAnalysisStorage、WorkStorage）各自重复实现了：

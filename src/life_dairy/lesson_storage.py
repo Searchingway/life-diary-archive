@@ -83,7 +83,9 @@ class LessonStorage:
                 continue
             items.append(lesson)
 
+        severity_order = {"严重": 0, "重要": 1, "中等": 2, "轻微": 3}
         items.sort(key=lambda item: (item.date, item.updated_at, item.created_at), reverse=True)
+        items.sort(key=lambda item: severity_order.get(item.severity, 9))
         return items
 
     def save_lesson(

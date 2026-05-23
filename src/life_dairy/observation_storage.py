@@ -117,7 +117,7 @@ class ObservationStorage:
             if keyword and not self._matches_query(observation, keyword):
                 continue
             items.append(observation)
-        items.sort(key=lambda item: (item.time, item.updated_at), reverse=True)
+        items.sort(key=lambda item: (item.intensity, item.time, item.updated_at), reverse=True)
         return items
 
     def load_observation(self, observation_id: str) -> ObservationEntry:
