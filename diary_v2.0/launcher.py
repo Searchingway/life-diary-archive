@@ -6,6 +6,7 @@ import os
 import base64
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import uuid
@@ -452,6 +453,143 @@ def export_entry_word_pdf(entry_id: str) -> dict[str, str]:
     return {"docx_path": str(docx_path), "pdf_path": str(pdf_path)}
 
 
+def build_diary_export_item(record_dir: Path) -> DiaryExportItem | None:
+    metadata_path = record_dir / "entry.json"
+    if not metadata_path.exists():
+        return None
+    data = read_json(metadata_path)
+    if data.get("deleted"):
+        return None
+    body_path = record_dir / str(data.get("body_file", "content.md"))
+    body = body_path.read_text(encoding="utf-8", errors="replace") if body_path.exists() else ""
+    images: list[DiaryImage] = []
+    image_paths: list[Path] = []
+    for value in data.get("images", []):
+        parsed = image_metadata(value)
+        if not parsed:
+            continue
+        file_name, label = parsed
+        images.append(DiaryImage(file_name=file_name, label=label))
+        path = record_dir / "images" / file_name
+        if path.exists():
+            image_paths.append(path)
+    entry = DiaryEntry(
+        id=str(data.get("id") or record_dir.name),
+        date=str(data.get("date") or date.today().isoformat()),
+        title=str(data.get("title") or ""),
+        body=body,
+        created_at=str(data.get("created_at") or now_iso()),
+        updated_at=str(data.get("updated_at") or now_iso()),
+        images=images,
+    )
+    return DiaryExportItem(
+        entry=entry,
+        image_lookup={path.name: path for path in image_paths},
+    )
+
+
+def select_export_directory() -> Path:
+    default_dir = DATA_ROOT / "exports"
+    default_dir.mkdir(parents=True, exist_ok=True)
+    script = r"""
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = '选择日记导出目录'
+$dialog.SelectedPath = $env:LIFE_DIARY_EXPORT_DEFAULT
+$dialog.ShowNewFolderButton = $true
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    Write-Output $dialog.SelectedPath
+}
+"""
+    env = os.environ.copy()
+    env["LIFE_DIARY_EXPORT_DEFAULT"] = str(default_dir)
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    selected = (result.stdout or "").strip().splitlines()
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "选择导出目录失败").strip())
+    if not selected:
+        raise ValueError("已取消选择导出目录")
+    output_dir = Path(selected[-1]).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def export_all_entries_word_pdf(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    output_text = str((payload or {}).get("output_dir") or "").strip()
+    output_dir = Path(output_text).expanduser().resolve() if output_text else select_export_directory()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    export_items: list[DiaryExportItem] = []
+    entries_dir = DATA_ROOT / "entries"
+    entries_dir.mkdir(parents=True, exist_ok=True)
+    for child in entries_dir.iterdir():
+        if not child.is_dir():
+            continue
+        item = build_diary_export_item(child)
+        if item is not None:
+            export_items.append(item)
+    if not export_items:
+        raise ValueError("没有可导出的日记")
+
+    exporter = DiaryExporter(output_dir)
+    docx_path, pdf_path = exporter.export_entries_word_and_pdf(
+        export_items,
+        export_all=True,
+    )
+    return {
+        "docx_path": str(docx_path),
+        "pdf_path": str(pdf_path),
+        "output_dir": str(output_dir),
+        "count": len(export_items),
+    }
+
+
+def update_entry_images(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    record_dir = DATA_ROOT / "entries" / entry_id
+    metadata_path = record_dir / "entry.json"
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"entry not found: {entry_id}")
+    images_dir = record_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    requested = payload.get("images")
+    if not isinstance(requested, list):
+        raise ValueError("images must be a list")
+
+    next_images: list[dict[str, str]] = []
+    keep_names: set[str] = set()
+    for item in requested:
+        parsed = image_metadata(item)
+        if not parsed:
+            continue
+        file_name, label = parsed
+        image_path = entry_image_path(entry_id, file_name)
+        if not image_path.exists():
+            continue
+        if file_name in keep_names:
+            continue
+        next_images.append({"file_name": file_name, "label": label.strip()})
+        keep_names.add(file_name)
+
+    data = read_json(metadata_path)
+    data["images"] = next_images
+    data["updated_at"] = now_iso()
+    write_json(metadata_path, data)
+
+    for child in images_dir.iterdir():
+        if child.is_file() and child.name not in keep_names:
+            child.unlink(missing_ok=True)
+
+    return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
+
+
 def save_resource(payload: dict[str, Any]) -> dict[str, Any]:
     record_id = str(payload.get("id") or uuid.uuid4().hex)
     record_dir = DATA_ROOT / "resources" / record_id
@@ -587,6 +725,12 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001 - app boundary
                 self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return
+        if parsed.path == "/api/modules/entries/export-all":
+            try:
+                self.send_json(export_all_entries_word_pdf(self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
         export_match = re.fullmatch(r"/api/modules/entries/([^/]+)/export", parsed.path)
         if export_match:
             try:
@@ -606,6 +750,17 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
             self.send_json(save_generic_record(module_key, payload))
         except Exception as exc:  # noqa: BLE001 - this is the app boundary
             self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+
+    def do_PUT(self) -> None:
+        parsed = urlparse(self.path)
+        image_match = re.fullmatch(r"/api/modules/entries/([^/]+)/images", parsed.path)
+        if image_match:
+            try:
+                self.send_json(update_entry_images(unquote(image_match.group(1)), self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        self.send_error(HTTPStatus.NOT_FOUND, "unknown endpoint")
 
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)

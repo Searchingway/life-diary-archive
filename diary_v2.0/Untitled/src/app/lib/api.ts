@@ -68,6 +68,8 @@ export interface ImageUploadFile {
 export interface ExportResult {
   docx_path: string;
   pdf_path: string;
+  count?: number;
+  output_dir?: string;
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -114,8 +116,18 @@ export function uploadEntryImages(entryId: string, files: ImageUploadFile[]): Pr
   });
 }
 
-export function exportEntry(entryId: string): Promise<ExportResult> {
-  return request<ExportResult>(`/api/modules/entries/${encodeURIComponent(entryId)}/export`, {
+export function updateEntryImages(
+  entryId: string,
+  images: Array<{ file_name: string; label?: string }>,
+): Promise<RecordItem> {
+  return request<RecordItem>(`/api/modules/entries/${encodeURIComponent(entryId)}/images`, {
+    method: "PUT",
+    body: JSON.stringify({ images }),
+  });
+}
+
+export function exportAllEntries(): Promise<ExportResult> {
+  return request<ExportResult>("/api/modules/entries/export-all", {
     method: "POST",
   });
 }

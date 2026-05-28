@@ -9,9 +9,10 @@ import {
   ModuleKey,
   RecordItem,
   deleteRecord,
-  exportEntry,
+  exportAllEntries,
   listRecords,
   saveRecord,
+  updateEntryImages,
   uploadEntryImages,
 } from "../../lib/api";
 
@@ -159,13 +160,15 @@ export function RecordModulePage({
     }
   }
 
-  async function handleExportEntry() {
-    if (!selected?.id || moduleKey !== "entries") return;
+  async function handleExportAllEntries() {
+    if (moduleKey !== "entries") return;
     setExporting(true);
     try {
-      const result = await exportEntry(selected.id);
-      window.alert(`导出完成\n\nWord：${result.docx_path}\nPDF：${result.pdf_path}`);
-      setMessage("已导出 Word 和 PDF");
+      const result = await exportAllEntries();
+      window.alert(
+        `全部导出完成，共 ${result.count ?? ""} 篇日记\n\n保存目录：${result.output_dir ?? ""}\nWord：${result.docx_path}\nPDF：${result.pdf_path}`,
+      );
+      setMessage("已全部导出 Word 和 PDF");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "导出失败");
     } finally {
@@ -266,9 +269,9 @@ export function RecordModulePage({
                 <div className="flex gap-2">
                   {moduleKey === "entries" && (
                     <>
-                      <Button variant="outline" onClick={handleExportEntry} disabled={!selected.id || exporting}>
+                      <Button variant="outline" onClick={handleExportAllEntries} disabled={exporting}>
                         <Download className="size-4" />
-                        {exporting ? "导出中" : "导出 Word / PDF"}
+                        {exporting ? "导出中" : "全部导出 Word / PDF"}
                       </Button>
                       <Button variant="outline" asChild>
                         <label>
@@ -342,7 +345,17 @@ export function RecordModulePage({
             {moduleKey === "resources" && (
               <ResourceCostEditor selected={selected} patchExtra={patchExtra} readOnly={readOnly} />
             )}
-            {moduleKey === "entries" && <DiaryImagePanel selected={selected} />}
+            {moduleKey === "entries" && (
+              <DiaryImagePanel
+                selected={selected}
+                readOnly={readOnly}
+                onImagesChanged={(record) => {
+                  setSelected(record);
+                  setRecords((items) => items.map((item) => (item.id === record.id ? record : item)));
+                }}
+                onMessage={setMessage}
+              />
+            )}
             {moduleKey === "action_plans" && <ActionPlanPreview selected={selected} />}
           </div>
         ) : (
@@ -359,7 +372,17 @@ export function RecordModulePage({
   );
 }
 
-function DiaryImagePanel({ selected }: { selected: RecordItem }) {
+function DiaryImagePanel({
+  selected,
+  readOnly,
+  onImagesChanged,
+  onMessage,
+}: {
+  selected: RecordItem;
+  readOnly: boolean;
+  onImagesChanged: (record: RecordItem) => void;
+  onMessage: (message: string) => void;
+}) {
   const rawImages = Array.isArray(selected.extra?.images) ? selected.extra.images : [];
   const images: EntryImage[] = rawImages
     .map((image) => {
@@ -383,31 +406,100 @@ function DiaryImagePanel({ selected }: { selected: RecordItem }) {
     })
     .filter((image): image is EntryImage => Boolean(image?.file_name));
 
+  async function syncImages(nextImages: Array<{ file_name: string; label?: string }>, message: string) {
+    if (!selected.id) return;
+    try {
+      const saved = await updateEntryImages(selected.id, nextImages);
+      onImagesChanged(saved);
+      onMessage(message);
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : "图片更新失败");
+    }
+  }
+
+  function renameImage(index: number, label: string) {
+    const nextImages = images.map((image, imageIndex) => ({
+      file_name: image.file_name,
+      label: imageIndex === index ? label : image.label || "",
+    }));
+    onImagesChanged({
+      ...selected,
+      extra: { ...(selected.extra ?? {}), images: nextImages },
+    });
+  }
+
+  function saveImageNames() {
+    syncImages(
+      images.map((image) => ({ file_name: image.file_name, label: image.label || "" })),
+      "图片备注名已保存",
+    );
+  }
+
+  function removeImage(index: number) {
+    const nextImages = images
+      .filter((_image, imageIndex) => imageIndex !== index)
+      .map((image) => ({ file_name: image.file_name, label: image.label || "" }));
+    syncImages(nextImages, "已删除图片");
+  }
+
+  function moveImage(index: number, direction: -1 | 1) {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= images.length) return;
+    const nextImages = images.map((image) => ({ file_name: image.file_name, label: image.label || "" }));
+    const [moved] = nextImages.splice(index, 1);
+    nextImages.splice(targetIndex, 0, moved);
+    syncImages(nextImages, "图片顺序已更新");
+  }
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <ImageIcon className="size-4" />
-          图片
-          <span className="text-sm text-muted-foreground">({images.length})</span>
-        </CardTitle>
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <ImageIcon className="size-4" />
+            图片
+            <span className="text-sm text-muted-foreground">({images.length})</span>
+          </CardTitle>
+          {!readOnly && images.length > 0 && (
+            <Button variant="outline" size="sm" onClick={saveImageNames}>
+              保存图片备注名
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         {images.length === 0 ? (
           <p className="text-sm text-muted-foreground">这篇日记还没有图片。</p>
         ) : (
-          <div className="grid grid-cols-4 gap-4">
-            {images.map((image) => (
-              <a
-                href={image.url}
-                target="_blank"
-                rel="noreferrer"
-                key={image.file_name}
-                className="block rounded-lg border bg-secondary overflow-hidden"
-              >
-                <img src={image.url} alt={image.label || image.file_name} className="aspect-square w-full object-cover" />
-                <div className="p-2 text-xs truncate">{image.label || image.file_name}</div>
-              </a>
+          <div className="space-y-3">
+            {images.map((image, index) => (
+              <div key={image.file_name} className="grid grid-cols-[96px_1fr_auto] gap-3 rounded-lg border bg-secondary/50 p-3">
+                <a href={image.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-md bg-background">
+                  <img src={image.url} alt={image.label || image.file_name} className="aspect-square w-full object-cover" />
+                </a>
+                <div className="space-y-2 min-w-0">
+                  <Input
+                    value={image.label || ""}
+                    onChange={(event) => renameImage(index, event.target.value)}
+                    readOnly={readOnly}
+                    placeholder="图片备注名"
+                  />
+                  <p className="text-xs text-muted-foreground truncate">{image.file_name}</p>
+                </div>
+                {!readOnly && (
+                  <div className="flex flex-col gap-2">
+                    <Button variant="outline" size="sm" onClick={() => moveImage(index, -1)} disabled={index === 0}>
+                      上移
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => moveImage(index, 1)} disabled={index === images.length - 1}>
+                      下移
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => removeImage(index)}>
+                      删除
+                    </Button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}
