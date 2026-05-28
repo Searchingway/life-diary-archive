@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import shutil
 import sys
 import threading
 import uuid
@@ -24,7 +25,9 @@ APP_TITLE = "人生档案 Diary Desktop 2.0"
 BASE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BASE_DIR.parent
 FRONTEND_DIST = BASE_DIR / "Untitled" / "dist"
-DATA_ROOT = Path(os.environ.get("LIFE_DIARY_DATA_ROOT", REPO_ROOT / "data" / "Diary")).resolve()
+LEGACY_DATA_ROOT = (REPO_ROOT / "data" / "Diary").resolve()
+DATA_ROOT = Path(os.environ.get("LIFE_DIARY_DATA_ROOT", BASE_DIR / "data" / "Diary")).resolve()
+MIGRATION_MARKER = DATA_ROOT / ".life_diary_2_migration.json"
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,52 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="microseconds")
 
 
+def migrate_legacy_data_if_needed() -> bool:
+    if os.environ.get("LIFE_DIARY_SKIP_MIGRATION") == "1":
+        DATA_ROOT.mkdir(parents=True, exist_ok=True)
+        return False
+    if MIGRATION_MARKER.exists():
+        return False
+    if DATA_ROOT.exists() and any(DATA_ROOT.iterdir()):
+        return False
+    DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    if not LEGACY_DATA_ROOT.exists():
+        MIGRATION_MARKER.write_text(
+            json.dumps(
+                {
+                    "migrated": False,
+                    "reason": "legacy data root not found",
+                    "legacy_data_root": str(LEGACY_DATA_ROOT),
+                    "created_at": now_iso(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return False
+    for child in LEGACY_DATA_ROOT.iterdir():
+        target = DATA_ROOT / child.name
+        if child.is_dir():
+            shutil.copytree(child, target, dirs_exist_ok=True)
+        elif child.is_file():
+            shutil.copy2(child, target)
+    MIGRATION_MARKER.write_text(
+        json.dumps(
+            {
+                "migrated": True,
+                "legacy_data_root": str(LEGACY_DATA_ROOT),
+                "data_root": str(DATA_ROOT),
+                "created_at": now_iso(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return True
+
+
 def first_text(data: dict[str, Any], fields: tuple[str, ...]) -> str:
     for field in fields:
         value = data.get(field)
@@ -78,6 +127,10 @@ def read_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as file:
         value = json.load(file)
     return value if isinstance(value, dict) else {}
+
+
+def write_json(path: Path, data: dict[str, Any]) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def read_body(record_dir: Path, data: dict[str, Any], module: ModuleConfig) -> str:
@@ -111,6 +164,21 @@ def read_body(record_dir: Path, data: dict[str, Any], module: ModuleConfig) -> s
                     body_parts.append(f"{item_type}: {item_value}".strip(": "))
 
     return "\n\n".join(dict.fromkeys(body_parts))
+
+
+def write_body(record_dir: Path, data: dict[str, Any], module: ModuleConfig, body: str) -> None:
+    if module.body_files:
+        filename = module.body_files[0]
+        if module.key == "entries":
+            data["body_file"] = filename
+        elif module.key in {"footprints", "self_analysis", "works", "notes"}:
+            if filename.endswith(".md"):
+                field = "summary_file" if filename == "summary.md" else "content_file"
+                data.setdefault(field, filename)
+        (record_dir / filename).write_text(body, encoding="utf-8")
+        return
+    if module.body_fields:
+        data[module.body_fields[0]] = body
 
 
 def record_from_directory(module: ModuleConfig, record_dir: Path) -> dict[str, Any] | None:
@@ -178,7 +246,13 @@ def build_overview() -> dict[str, Any]:
             recent.append({**record, "module": module.label, "module_key": module.key})
 
     recent.sort(key=lambda item: str(item.get("updated_at") or item.get("date") or ""), reverse=True)
-    return {"data_root": str(DATA_ROOT), "modules": modules, "recent": recent[:20]}
+    return {
+        "data_root": str(DATA_ROOT),
+        "legacy_data_root": str(LEGACY_DATA_ROOT),
+        "migrated_from_legacy": MIGRATION_MARKER.exists(),
+        "modules": modules,
+        "recent": recent[:20],
+    }
 
 
 def save_entry(payload: dict[str, Any]) -> dict[str, Any]:
@@ -234,6 +308,68 @@ def save_resource(payload: dict[str, Any]) -> dict[str, Any]:
     return record_from_directory(MODULE_BY_KEY["resources"], record_dir) or {}
 
 
+def save_generic_record(module_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if module_key == "entries":
+        return save_entry(payload)
+    if module_key == "resources":
+        return save_resource(payload)
+
+    module = MODULE_BY_KEY[module_key]
+    record_id = str(payload.get("id") or uuid.uuid4().hex)
+    record_dir = DATA_ROOT / module.directory / record_id
+    record_dir.mkdir(parents=True, exist_ok=True)
+    metadata_path = record_dir / module.json_file
+    existing = read_json(metadata_path) if metadata_path.exists() else {}
+    extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
+    timestamp = now_iso()
+    data = {
+        **existing,
+        **extra,
+        "id": record_id,
+        "created_at": existing.get("created_at") or extra.get("created_at") or timestamp,
+        "updated_at": timestamp,
+    }
+
+    title_field = module.title_fields[0]
+    data[title_field] = str(payload.get("title") or data.get(title_field) or "")
+
+    date_value = str(payload.get("date") or "")
+    if date_value:
+        date_field = module.date_fields[0]
+        data[date_field] = date_value
+
+    if payload.get("type"):
+        data[module.type_fields[0]] = str(payload.get("type"))
+    if payload.get("status"):
+        data[module.status_fields[0]] = str(payload.get("status"))
+
+    write_body(record_dir, data, module, str(payload.get("body") or ""))
+    if module.key == "footprints":
+        data.setdefault("visit_ids", [])
+        data.setdefault("images", [])
+    if module.key == "action_plans":
+        data.setdefault("tasks", [])
+    if module.key == "plans":
+        data.setdefault("tags", [])
+        data.setdefault("plan_type", data.get("plan_type") or "add")
+
+    write_json(metadata_path, data)
+    return record_from_directory(module, record_dir) or {}
+
+
+def delete_generic_record(module_key: str, record_id: str) -> None:
+    module = MODULE_BY_KEY[module_key]
+    metadata_path = DATA_ROOT / module.directory / record_id / module.json_file
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"record not found: {record_id}")
+    data = read_json(metadata_path)
+    timestamp = now_iso()
+    data["deleted"] = True
+    data["deleted_at"] = timestamp
+    data["updated_at"] = timestamp
+    write_json(metadata_path, data)
+
+
 class LifeDiaryHandler(BaseHTTPRequestHandler):
     server_version = "LifeDiary2/1.0"
 
@@ -257,18 +393,35 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/actions/open-data-root":
+            os.startfile(DATA_ROOT)  # type: ignore[attr-defined]
+            self.send_json({"ok": True})
+            return
         if not parsed.path.startswith("/api/modules/"):
             self.send_error(HTTPStatus.NOT_FOUND, "unknown endpoint")
             return
         module_key = unquote(parsed.path.removeprefix("/api/modules/"))
         try:
+            if module_key not in MODULE_BY_KEY:
+                self.send_error(HTTPStatus.NOT_FOUND, "unknown module")
+                return
             payload = self.read_json_body()
-            if module_key == "entries":
-                self.send_json(save_entry(payload))
-            elif module_key == "resources":
-                self.send_json(save_resource(payload))
-            else:
-                self.send_error(HTTPStatus.BAD_REQUEST, "this module is read-only in 2.0 preview")
+            self.send_json(save_generic_record(module_key, payload))
+        except Exception as exc:  # noqa: BLE001 - this is the app boundary
+            self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith("/api/modules/"):
+            self.send_error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+            return
+        parts = [unquote(part) for part in parsed.path.removeprefix("/api/modules/").split("/") if part]
+        if len(parts) != 2 or parts[0] not in MODULE_BY_KEY:
+            self.send_error(HTTPStatus.NOT_FOUND, "unknown record")
+            return
+        try:
+            delete_generic_record(parts[0], parts[1])
+            self.send_json({"ok": True})
         except Exception as exc:  # noqa: BLE001 - this is the app boundary
             self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
 
@@ -306,7 +459,7 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
 
 
 def start_server() -> ThreadingHTTPServer:
-    DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    migrate_legacy_data_if_needed()
     server = ThreadingHTTPServer(("127.0.0.1", 0), LifeDiaryHandler)
     thread = threading.Thread(target=server.serve_forever, name="LifeDiary2Server", daemon=True)
     thread.start()
