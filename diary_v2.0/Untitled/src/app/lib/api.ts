@@ -59,6 +59,18 @@ export interface EntryImage {
   url: string;
 }
 
+export interface AppSettings {
+  export_dir: string;
+  updated_at?: string;
+}
+
+export interface FootprintVisit {
+  id: string;
+  date: string;
+  thought?: string;
+  images?: EntryImage[];
+}
+
 export interface ImageUploadFile {
   name: string;
   data: string;
@@ -109,6 +121,21 @@ export function openDataRoot(): Promise<{ ok: true }> {
   return request<{ ok: true }>("/api/actions/open-data-root", { method: "POST" });
 }
 
+export function getSettings(): Promise<AppSettings> {
+  return request<AppSettings>("/api/settings");
+}
+
+export function saveSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
+  return request<AppSettings>("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(settings),
+  });
+}
+
+export function selectExportDirectory(): Promise<AppSettings> {
+  return request<AppSettings>("/api/actions/select-export-dir", { method: "POST" });
+}
+
 export function uploadEntryImages(entryId: string, files: ImageUploadFile[]): Promise<RecordItem> {
   return request<RecordItem>(`/api/modules/entries/${encodeURIComponent(entryId)}/images`, {
     method: "POST",
@@ -123,6 +150,63 @@ export function updateEntryImages(
   return request<RecordItem>(`/api/modules/entries/${encodeURIComponent(entryId)}/images`, {
     method: "PUT",
     body: JSON.stringify({ images }),
+  });
+}
+
+export function uploadFootprintVisitImages(
+  footprintId: string,
+  visitId: string,
+  files: ImageUploadFile[],
+): Promise<RecordItem> {
+  return request<RecordItem>(
+    `/api/modules/footprints/${encodeURIComponent(footprintId)}/visits/${encodeURIComponent(visitId)}/images`,
+    {
+      method: "POST",
+      body: JSON.stringify({ files }),
+    },
+  );
+}
+
+export function saveFootprintVisit(
+  footprintId: string,
+  payload: { date: string; thought?: string },
+): Promise<RecordItem> {
+  return request<RecordItem>(`/api/modules/footprints/${encodeURIComponent(footprintId)}/visits`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateFootprintVisitImages(
+  footprintId: string,
+  visitId: string,
+  images: Array<{ file_name: string; label?: string }>,
+): Promise<RecordItem> {
+  return request<RecordItem>(
+    `/api/modules/footprints/${encodeURIComponent(footprintId)}/visits/${encodeURIComponent(visitId)}/images`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ images }),
+    },
+  );
+}
+
+export function classifyEntryImages(
+  entryId: string,
+  payload: { footprint_id: string; date: string; images: string[] },
+): Promise<{ ok: true; copied: number; footprint?: RecordItem }> {
+  return request<{ ok: true; copied: number; footprint?: RecordItem }>(
+    `/api/modules/entries/${encodeURIComponent(entryId)}/classify-images`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function promoteLightPlan(planId: string): Promise<RecordItem> {
+  return request<RecordItem>(`/api/modules/plans/${encodeURIComponent(planId)}/promote-action`, {
+    method: "POST",
   });
 }
 

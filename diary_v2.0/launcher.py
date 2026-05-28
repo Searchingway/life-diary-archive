@@ -36,6 +36,7 @@ FRONTEND_DIST = BASE_DIR / "Untitled" / "dist"
 LEGACY_DATA_ROOT = (REPO_ROOT / "data" / "Diary").resolve()
 DATA_ROOT = Path(os.environ.get("LIFE_DIARY_DATA_ROOT", BASE_DIR / "data" / "Diary")).resolve()
 MIGRATION_MARKER = DATA_ROOT / ".life_diary_2_migration.json"
+SETTINGS_PATH = DATA_ROOT / "config" / "app_settings.json"
 
 
 @dataclass(frozen=True)
@@ -138,7 +139,34 @@ def read_json(path: Path) -> dict[str, Any]:
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def read_settings() -> dict[str, Any]:
+    if SETTINGS_PATH.exists():
+        try:
+            return read_json(SETTINGS_PATH)
+        except (OSError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
+def write_settings(data: dict[str, Any]) -> dict[str, Any]:
+    settings = {**read_settings(), **data, "updated_at": now_iso()}
+    write_json(SETTINGS_PATH, settings)
+    return settings
+
+
+def default_export_dir() -> Path:
+    return (DATA_ROOT / "exports").resolve()
+
+
+def configured_export_dir() -> Path:
+    value = str(read_settings().get("export_dir") or "").strip()
+    output_dir = Path(value).expanduser().resolve() if value else default_export_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def read_body(record_dir: Path, data: dict[str, Any], module: ModuleConfig) -> str:
@@ -207,6 +235,8 @@ def record_from_directory(module: ModuleConfig, record_dir: Path) -> dict[str, A
     record_type = first_text(data, module.type_fields)
     status = first_text(data, module.status_fields)
     subtitle = " / ".join(part for part in (record_type, status) if part) or module.label
+    if module.key == "footprints":
+        data = {**data, "visits": read_footprint_visits(record_dir, data)}
 
     return {
         "id": record_id,
@@ -445,7 +475,7 @@ def export_entry_word_pdf(entry_id: str) -> dict[str, str]:
         updated_at=str(data.get("updated_at") or now_iso()),
         images=images,
     )
-    export_dir = DATA_ROOT / "exports"
+    export_dir = configured_export_dir()
     exporter = DiaryExporter(export_dir)
     docx_path, pdf_path = exporter.export_entries_word_and_pdf(
         [DiaryExportItem(entry=entry, image_lookup=exporter._build_image_lookup(image_paths))]
@@ -489,7 +519,7 @@ def build_diary_export_item(record_dir: Path) -> DiaryExportItem | None:
 
 
 def select_export_directory() -> Path:
-    default_dir = DATA_ROOT / "exports"
+    default_dir = configured_export_dir()
     default_dir.mkdir(parents=True, exist_ok=True)
     script = r"""
 Add-Type -AssemblyName System.Windows.Forms
@@ -522,9 +552,15 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     return output_dir
 
 
+def select_and_store_export_directory() -> dict[str, str]:
+    output_dir = select_export_directory()
+    write_settings({"export_dir": str(output_dir)})
+    return {"export_dir": str(output_dir)}
+
+
 def export_all_entries_word_pdf(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     output_text = str((payload or {}).get("output_dir") or "").strip()
-    output_dir = Path(output_text).expanduser().resolve() if output_text else select_export_directory()
+    output_dir = Path(output_text).expanduser().resolve() if output_text else configured_export_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     export_items: list[DiaryExportItem] = []
@@ -588,6 +624,235 @@ def update_entry_images(entry_id: str, payload: dict[str, Any]) -> dict[str, Any
             child.unlink(missing_ok=True)
 
     return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
+
+
+def normalize_images(values: Any, url_builder: Any | None = None) -> list[dict[str, str]]:
+    images: list[dict[str, str]] = []
+    if not isinstance(values, list):
+        return images
+    for value in values:
+        parsed = image_metadata(value)
+        if not parsed:
+            continue
+        file_name, label = parsed
+        image = {"file_name": file_name, "label": label}
+        if url_builder is not None:
+            image["url"] = str(url_builder(file_name))
+        images.append(image)
+    return images
+
+
+def read_footprint_visits(record_dir: Path, data: dict[str, Any]) -> list[dict[str, Any]]:
+    visits_dir = record_dir / "visits"
+    visits_dir.mkdir(parents=True, exist_ok=True)
+    visit_ids = data.get("visit_ids") if isinstance(data.get("visit_ids"), list) else []
+    candidates = [visits_dir / str(visit_id) for visit_id in visit_ids]
+    candidates.extend(child for child in visits_dir.iterdir() if child.is_dir() and child not in candidates)
+    visits: list[dict[str, Any]] = []
+    for visit_dir in candidates:
+        visit_path = visit_dir / "visit.json"
+        if not visit_path.exists():
+            continue
+        try:
+            visit = read_json(visit_path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if visit.get("deleted"):
+            continue
+        visit_id = str(visit.get("id") or visit_dir.name)
+        thought_path = visit_dir / "thought.md"
+        thought = thought_path.read_text(encoding="utf-8", errors="replace") if thought_path.exists() else ""
+        visit["id"] = visit_id
+        visit["date"] = str(visit.get("date") or visit.get("visit_date") or "")[:10]
+        visit["thought"] = thought or str(visit.get("thought") or visit.get("reflection") or "")
+        visit["images"] = normalize_images(
+            visit.get("images", []),
+            lambda name, place_id=record_dir.name, current_visit_id=visit_id: (
+                f"/api/modules/footprints/{place_id}/visits/{current_visit_id}/images/{name}"
+            ),
+        )
+        visits.append(visit)
+    visits.sort(key=lambda item: str(item.get("date") or item.get("updated_at") or ""), reverse=True)
+    return visits
+
+
+def footprint_visit_dir(place_id: str, visit_id: str) -> Path:
+    base = (DATA_ROOT / "footprints" / place_id / "visits").resolve()
+    target = (base / visit_id).resolve()
+    if not str(target).startswith(str(base)):
+        raise ValueError("invalid visit path")
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def ensure_footprint_visit(place_id: str, visit_date: str) -> tuple[Path, dict[str, Any]]:
+    place_dir = DATA_ROOT / "footprints" / place_id
+    metadata_path = place_dir / "footprint.json"
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"footprint not found: {place_id}")
+    place_data = read_json(metadata_path)
+    visits = read_footprint_visits(place_dir, place_data)
+    for visit in visits:
+        if str(visit.get("date") or "") == visit_date:
+            visit_dir = footprint_visit_dir(place_id, str(visit["id"]))
+            return visit_dir, read_json(visit_dir / "visit.json")
+    visit_id = uuid.uuid4().hex
+    visit_dir = footprint_visit_dir(place_id, visit_id)
+    timestamp = now_iso()
+    visit = {
+        "id": visit_id,
+        "date": visit_date,
+        "images": [],
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    write_json(visit_dir / "visit.json", visit)
+    visit_ids = list(place_data.get("visit_ids", [])) if isinstance(place_data.get("visit_ids"), list) else []
+    if visit_id not in visit_ids:
+        visit_ids.append(visit_id)
+    place_data["visit_ids"] = visit_ids
+    place_data["updated_at"] = timestamp
+    write_json(metadata_path, place_data)
+    return visit_dir, visit
+
+
+def save_footprint_visit(place_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    visit_date = str(payload.get("date") or date.today().isoformat())[:10]
+    visit_dir, visit = ensure_footprint_visit(place_id, visit_date)
+    thought = str(payload.get("thought") or "")
+    if thought:
+        (visit_dir / "thought.md").write_text(thought, encoding="utf-8")
+    visit["date"] = visit_date
+    visit["updated_at"] = now_iso()
+    write_json(visit_dir / "visit.json", visit)
+    return record_from_directory(MODULE_BY_KEY["footprints"], DATA_ROOT / "footprints" / place_id) or {}
+
+
+def footprint_visit_image_path(place_id: str, visit_id: str, image_name: str) -> Path:
+    images_root = (DATA_ROOT / "footprints" / place_id / "visits" / visit_id / "images").resolve()
+    candidate = (images_root / image_name).resolve()
+    if not str(candidate).startswith(str(images_root)):
+        raise ValueError("invalid image path")
+    if not candidate.exists():
+        raise FileNotFoundError(f"image not found: {image_name}")
+    return candidate
+
+
+def add_footprint_visit_images(place_id: str, visit_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    visit_dir = footprint_visit_dir(place_id, visit_id)
+    visit_path = visit_dir / "visit.json"
+    if not visit_path.exists():
+        raise FileNotFoundError(f"visit not found: {visit_id}")
+    images_dir = visit_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    visit = read_json(visit_path)
+    images = list(visit.get("images", [])) if isinstance(visit.get("images"), list) else []
+    files = payload.get("files")
+    if not isinstance(files, list):
+        raise ValueError("files must be a list")
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        raw_data = str(item.get("data") or "")
+        if "," in raw_data and raw_data.startswith("data:"):
+            raw_data = raw_data.split(",", 1)[1]
+        file_name = unique_image_name(images_dir, str(item.get("name") or "image.png"))
+        (images_dir / file_name).write_bytes(base64.b64decode(raw_data))
+        images.append({"file_name": file_name, "label": str(item.get("label") or "")})
+    visit["images"] = images
+    visit["updated_at"] = now_iso()
+    write_json(visit_path, visit)
+    return record_from_directory(MODULE_BY_KEY["footprints"], DATA_ROOT / "footprints" / place_id) or {}
+
+
+def update_footprint_visit_images(place_id: str, visit_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    visit_dir = footprint_visit_dir(place_id, visit_id)
+    visit_path = visit_dir / "visit.json"
+    if not visit_path.exists():
+        raise FileNotFoundError(f"visit not found: {visit_id}")
+    images_dir = visit_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    requested = payload.get("images")
+    if not isinstance(requested, list):
+        raise ValueError("images must be a list")
+    next_images: list[dict[str, str]] = []
+    keep_names: set[str] = set()
+    for item in requested:
+        parsed = image_metadata(item)
+        if not parsed:
+            continue
+        file_name, label = parsed
+        path = footprint_visit_image_path(place_id, visit_id, file_name)
+        if path.exists() and file_name not in keep_names:
+            next_images.append({"file_name": file_name, "label": label.strip()})
+            keep_names.add(file_name)
+    visit = read_json(visit_path)
+    visit["images"] = next_images
+    visit["updated_at"] = now_iso()
+    write_json(visit_path, visit)
+    for child in images_dir.iterdir():
+        if child.is_file() and child.name not in keep_names:
+            child.unlink(missing_ok=True)
+    return record_from_directory(MODULE_BY_KEY["footprints"], DATA_ROOT / "footprints" / place_id) or {}
+
+
+def classify_entry_images_to_footprint(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    place_id = str(payload.get("footprint_id") or "")
+    visit_date = str(payload.get("date") or date.today().isoformat())[:10]
+    selected_names = payload.get("images")
+    if not place_id:
+        raise ValueError("footprint_id is required")
+    if not isinstance(selected_names, list) or not selected_names:
+        raise ValueError("images must be a non-empty list")
+    entry_dir = DATA_ROOT / "entries" / entry_id
+    entry_data = read_json(entry_dir / "entry.json")
+    entry_images = normalize_images(entry_data.get("images", []))
+    label_by_name = {image["file_name"]: image.get("label", "") for image in entry_images}
+    visit_dir, visit = ensure_footprint_visit(place_id, visit_date)
+    images_dir = visit_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    images = list(visit.get("images", [])) if isinstance(visit.get("images"), list) else []
+    copied = 0
+    for image_name in selected_names:
+        source = entry_image_path(entry_id, str(image_name))
+        file_name = unique_image_name(images_dir, source.name)
+        shutil.copy2(source, images_dir / file_name)
+        images.append({"file_name": file_name, "label": label_by_name.get(source.name, "")})
+        copied += 1
+    visit["images"] = images
+    visit["updated_at"] = now_iso()
+    write_json(visit_dir / "visit.json", visit)
+    return {"ok": True, "copied": copied, "footprint": record_from_directory(MODULE_BY_KEY["footprints"], DATA_ROOT / "footprints" / place_id)}
+
+
+def promote_light_plan_to_action(plan_id: str) -> dict[str, Any]:
+    source_dir = DATA_ROOT / "plans" / plan_id
+    source_path = source_dir / "plan.json"
+    if not source_path.exists():
+        raise FileNotFoundError(f"plan not found: {plan_id}")
+    source = read_json(source_path)
+    body = read_body(source_dir, source, MODULE_BY_KEY["plans"])
+    record_id = uuid.uuid4().hex
+    record_dir = DATA_ROOT / "action_plans" / record_id
+    timestamp = now_iso()
+    plan_date = str(source.get("due_date") or source.get("start_date") or date.today().isoformat())[:10]
+    data = {
+        "id": record_id,
+        "title": str(source.get("title") or "未命名行动计划"),
+        "plan_type": "日程型行动计划",
+        "description": body,
+        "start_date": plan_date,
+        "end_date": "",
+        "status": "进行中",
+        "source_light_plan_id": plan_id,
+        "tasks": [],
+        "summary": "",
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    record_dir.mkdir(parents=True, exist_ok=True)
+    write_json(record_dir / "action_plan.json", data)
+    return record_from_directory(MODULE_BY_KEY["action_plans"], record_dir) or {}
 
 
 def save_resource(payload: dict[str, Any]) -> dict[str, Any]:
@@ -694,10 +959,25 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/overview":
             self.send_json(build_overview())
             return
+        if parsed.path == "/api/settings":
+            self.send_json({**read_settings(), "export_dir": str(configured_export_dir())})
+            return
         image_match = re.fullmatch(r"/api/modules/entries/([^/]+)/images/(.+)", parsed.path)
         if image_match:
             try:
                 path = entry_image_path(unquote(image_match.group(1)), unquote(image_match.group(2)))
+                self.send_file(path)
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
+        footprint_image_match = re.fullmatch(r"/api/modules/footprints/([^/]+)/visits/([^/]+)/images/(.+)", parsed.path)
+        if footprint_image_match:
+            try:
+                path = footprint_visit_image_path(
+                    unquote(footprint_image_match.group(1)),
+                    unquote(footprint_image_match.group(2)),
+                    unquote(footprint_image_match.group(3)),
+                )
                 self.send_file(path)
             except Exception as exc:  # noqa: BLE001 - app boundary
                 self.send_error(HTTPStatus.NOT_FOUND, str(exc))
@@ -718,10 +998,56 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
             os.startfile(DATA_ROOT)  # type: ignore[attr-defined]
             self.send_json({"ok": True})
             return
+        if parsed.path == "/api/actions/select-export-dir":
+            try:
+                self.send_json(select_and_store_export_directory())
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        if parsed.path == "/api/settings":
+            try:
+                self.send_json(write_settings(self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
         image_match = re.fullmatch(r"/api/modules/entries/([^/]+)/images", parsed.path)
         if image_match:
             try:
                 self.send_json(add_entry_images(unquote(image_match.group(1)), self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        classify_match = re.fullmatch(r"/api/modules/entries/([^/]+)/classify-images", parsed.path)
+        if classify_match:
+            try:
+                self.send_json(classify_entry_images_to_footprint(unquote(classify_match.group(1)), self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        footprint_image_match = re.fullmatch(r"/api/modules/footprints/([^/]+)/visits/([^/]+)/images", parsed.path)
+        if footprint_image_match:
+            try:
+                self.send_json(
+                    add_footprint_visit_images(
+                        unquote(footprint_image_match.group(1)),
+                        unquote(footprint_image_match.group(2)),
+                        self.read_json_body(),
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        visit_match = re.fullmatch(r"/api/modules/footprints/([^/]+)/visits", parsed.path)
+        if visit_match:
+            try:
+                self.send_json(save_footprint_visit(unquote(visit_match.group(1)), self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        promote_match = re.fullmatch(r"/api/modules/plans/([^/]+)/promote-action", parsed.path)
+        if promote_match:
+            try:
+                self.send_json(promote_light_plan_to_action(unquote(promote_match.group(1))))
             except Exception as exc:  # noqa: BLE001 - app boundary
                 self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return
@@ -757,6 +1083,19 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         if image_match:
             try:
                 self.send_json(update_entry_images(unquote(image_match.group(1)), self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        footprint_image_match = re.fullmatch(r"/api/modules/footprints/([^/]+)/visits/([^/]+)/images", parsed.path)
+        if footprint_image_match:
+            try:
+                self.send_json(
+                    update_footprint_visit_images(
+                        unquote(footprint_image_match.group(1)),
+                        unquote(footprint_image_match.group(2)),
+                        self.read_json_body(),
+                    )
+                )
             except Exception as exc:  # noqa: BLE001 - app boundary
                 self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return

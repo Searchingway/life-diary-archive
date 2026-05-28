@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
+import { Activity, AlertTriangle, Database, Download, FileCheck, FolderOpen } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { Activity, AlertTriangle, Database, FileCheck, FolderOpen } from "lucide-react";
-import { Overview, getOverview, openDataRoot } from "../lib/api";
+import { AppSettings, Overview, getOverview, getSettings, openDataRoot, selectExportDirectory } from "../lib/api";
 
 export function DataManagement() {
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
   const [message, setMessage] = useState("正在检查数据");
 
   useEffect(() => {
@@ -15,6 +16,7 @@ export function DataManagement() {
         setMessage(data.migrated_from_legacy ? "首次启动已从旧版目录迁移数据" : "2.0 数据目录可用");
       })
       .catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
+    getSettings().then(setSettings).catch(() => undefined);
   }, []);
 
   async function handleOpenDataRoot() {
@@ -22,6 +24,16 @@ export function DataManagement() {
       await openDataRoot();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "打开数据目录失败");
+    }
+  }
+
+  async function handleSelectExportDir() {
+    try {
+      const next = await selectExportDirectory();
+      setSettings(next);
+      setMessage("导出位置已保存");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "选择导出位置失败");
     }
   }
 
@@ -57,6 +69,25 @@ export function DataManagement() {
             <Button variant="outline" onClick={handleOpenDataRoot}>
               <FolderOpen className="size-4" />
               打开 2.0 数据文件夹
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Download className="size-5" />
+              导出位置
+            </CardTitle>
+            <CardDescription>以后 Word 和 PDF 全量导出会直接保存到这里</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="p-4 bg-secondary rounded-lg font-mono text-sm break-all">
+              {settings?.export_dir || `${overview?.data_root || "diary_v2.0/data/Diary"}\\exports`}
+            </div>
+            <Button variant="outline" onClick={handleSelectExportDir}>
+              <FolderOpen className="size-4" />
+              选择导出位置
             </Button>
           </CardContent>
         </Card>
