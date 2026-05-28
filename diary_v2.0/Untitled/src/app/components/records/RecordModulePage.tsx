@@ -1,10 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
-import { LucideIcon, Plus, Save, Search, Trash2 } from "lucide-react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { LucideIcon, Plus, Save, Search, Trash2, Download, Image as ImageIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import { ModuleKey, RecordItem, deleteRecord, listRecords, saveRecord } from "../../lib/api";
+import {
+  EntryImage,
+  ModuleKey,
+  RecordItem,
+  deleteRecord,
+  exportEntry,
+  listRecords,
+  saveRecord,
+  uploadEntryImages,
+} from "../../lib/api";
 
 const resourceLabels = ["时间", "金钱", "精力", "情绪", "勇气", "身体", "注意力", "风险", "机会成本"];
 
@@ -55,6 +64,8 @@ export function RecordModulePage({
   const [message, setMessage] = useState("正在读取旧版数据");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const selectedIndex = useMemo(
     () => records.findIndex((record) => record.id && record.id === selected?.id),
@@ -94,18 +105,71 @@ export function RecordModulePage({
     );
   }
 
-  async function saveCurrent() {
-    if (!selected || readOnly) return;
+  async function saveSelected(): Promise<RecordItem | null> {
+    if (!selected || readOnly) return null;
     setSaving(true);
     try {
       const saved = await saveRecord(moduleKey, selected);
       setSelected(saved);
       await load(query);
       setMessage("已保存到 2.0 数据目录");
+      return saved;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
+      return null;
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveCurrent() {
+    await saveSelected();
+  }
+
+  async function handleImageUpload(event: ChangeEvent<HTMLInputElement>) {
+    const inputFiles = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!inputFiles.length || moduleKey !== "entries") return;
+    setImageBusy(true);
+    try {
+      let target = selected;
+      if (!target?.id) {
+        target = await saveSelected();
+      }
+      if (!target?.id) return;
+      const files = await Promise.all(
+        inputFiles.map(
+          (file) =>
+            new Promise<{ name: string; data: string }>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve({ name: file.name, data: String(reader.result || "") });
+              reader.onerror = () => reject(reader.error);
+              reader.readAsDataURL(file);
+            }),
+        ),
+      );
+      const saved = await uploadEntryImages(target.id, files);
+      setSelected(saved);
+      await load(query);
+      setMessage(`已插入 ${files.length} 张图片`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "插入图片失败");
+    } finally {
+      setImageBusy(false);
+    }
+  }
+
+  async function handleExportEntry() {
+    if (!selected?.id || moduleKey !== "entries") return;
+    setExporting(true);
+    try {
+      const result = await exportEntry(selected.id);
+      window.alert(`导出完成\n\nWord：${result.docx_path}\nPDF：${result.pdf_path}`);
+      setMessage("已导出 Word 和 PDF");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "导出失败");
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -200,6 +264,28 @@ export function RecordModulePage({
               </div>
               {!readOnly && (
                 <div className="flex gap-2">
+                  {moduleKey === "entries" && (
+                    <>
+                      <Button variant="outline" onClick={handleExportEntry} disabled={!selected.id || exporting}>
+                        <Download className="size-4" />
+                        {exporting ? "导出中" : "导出 Word / PDF"}
+                      </Button>
+                      <Button variant="outline" asChild>
+                        <label>
+                          <ImageIcon className="size-4" />
+                          {imageBusy ? "插入中" : "插入图片"}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            className="hidden"
+                            onChange={handleImageUpload}
+                            disabled={imageBusy}
+                          />
+                        </label>
+                      </Button>
+                    </>
+                  )}
                   <Button variant="outline" onClick={deleteCurrent} disabled={!selected.id}>
                     <Trash2 className="size-4" />
                     删除
@@ -256,6 +342,7 @@ export function RecordModulePage({
             {moduleKey === "resources" && (
               <ResourceCostEditor selected={selected} patchExtra={patchExtra} readOnly={readOnly} />
             )}
+            {moduleKey === "entries" && <DiaryImagePanel selected={selected} />}
             {moduleKey === "action_plans" && <ActionPlanPreview selected={selected} />}
           </div>
         ) : (
@@ -269,6 +356,63 @@ export function RecordModulePage({
         )}
       </div>
     </div>
+  );
+}
+
+function DiaryImagePanel({ selected }: { selected: RecordItem }) {
+  const rawImages = Array.isArray(selected.extra?.images) ? selected.extra.images : [];
+  const images: EntryImage[] = rawImages
+    .map((image) => {
+      if (typeof image === "string") {
+        return {
+          file_name: image,
+          label: "",
+          url: `/api/modules/entries/${encodeURIComponent(selected.id)}/images/${encodeURIComponent(image)}`,
+        };
+      }
+      if (typeof image === "object" && image) {
+        const value = image as Record<string, unknown>;
+        const fileName = String(value.file_name || value.name || "");
+        return {
+          file_name: fileName,
+          label: String(value.label || ""),
+          url: `/api/modules/entries/${encodeURIComponent(selected.id)}/images/${encodeURIComponent(fileName)}`,
+        };
+      }
+      return null;
+    })
+    .filter((image): image is EntryImage => Boolean(image?.file_name));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <ImageIcon className="size-4" />
+          图片
+          <span className="text-sm text-muted-foreground">({images.length})</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {images.length === 0 ? (
+          <p className="text-sm text-muted-foreground">这篇日记还没有图片。</p>
+        ) : (
+          <div className="grid grid-cols-4 gap-4">
+            {images.map((image) => (
+              <a
+                href={image.url}
+                target="_blank"
+                rel="noreferrer"
+                key={image.file_name}
+                className="block rounded-lg border bg-secondary overflow-hidden"
+              >
+                <img src={image.url} alt={image.label || image.file_name} className="aspect-square w-full object-cover" />
+                <div className="p-2 text-xs truncate">{image.label || image.file_name}</div>
+              </a>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

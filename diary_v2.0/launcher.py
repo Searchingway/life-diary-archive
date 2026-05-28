@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import base64
+import re
 import shutil
 import sys
 import threading
@@ -15,6 +17,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
+
+sys.path.insert(0, str((Path(__file__).resolve().parent.parent / "src").resolve()))
+
+from life_dairy.exporters import DiaryExporter, DiaryExportItem
+from life_dairy.models import DiaryEntry, DiaryImage
 
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QApplication, QMainWindow
@@ -250,8 +257,78 @@ def build_overview() -> dict[str, Any]:
         "data_root": str(DATA_ROOT),
         "legacy_data_root": str(LEGACY_DATA_ROOT),
         "migrated_from_legacy": MIGRATION_MARKER.exists(),
+        "dashboard_stats": build_dashboard_stats(),
         "modules": modules,
         "recent": recent[:20],
+    }
+
+
+def build_dashboard_stats() -> dict[str, int]:
+    today = date.today()
+    month_prefix = today.strftime("%Y-%m")
+    year_prefix = today.strftime("%Y")
+    entries = list_module_records("entries")
+    light_plans = list_module_records("plans")
+    action_plans = list_module_records("action_plans")
+
+    month_entries = [entry for entry in entries if str(entry.get("date", "")).startswith(month_prefix)]
+    year_entries = [entry for entry in entries if str(entry.get("date", "")).startswith(year_prefix)]
+
+    def word_count(records: list[dict[str, Any]]) -> int:
+        return sum(len(str(record.get("body", ""))) for record in records)
+
+    def image_count(records: list[dict[str, Any]]) -> int:
+        total = 0
+        for record in records:
+            extra = record.get("extra")
+            if isinstance(extra, dict) and isinstance(extra.get("images"), list):
+                total += len(extra["images"])
+        return total
+
+    def completed(record: dict[str, Any]) -> bool:
+        status = str(record.get("status") or "")
+        extra = record.get("extra") if isinstance(record.get("extra"), dict) else {}
+        tasks = extra.get("tasks") if isinstance(extra, dict) else []
+        if "完成" in status or status.lower() in {"completed", "done"}:
+            return True
+        if isinstance(tasks, list) and tasks:
+            return all(isinstance(task, dict) and task.get("done") for task in tasks)
+        return False
+
+    def active(record: dict[str, Any]) -> bool:
+        status = str(record.get("status") or "")
+        return ("进行" in status) or status.lower() in {"active", "in_progress"} or not completed(record)
+
+    def updated_in(record: dict[str, Any], prefix: str) -> bool:
+        value = str(record.get("updated_at") or record.get("date") or "")
+        return value.startswith(prefix)
+
+    today_str = today.isoformat()
+    today_pending = 0
+    for plan in action_plans:
+        extra = plan.get("extra") if isinstance(plan.get("extra"), dict) else {}
+        tasks = extra.get("tasks") if isinstance(extra, dict) else []
+        if isinstance(tasks, list):
+            today_pending += sum(
+                1
+                for task in tasks
+                if isinstance(task, dict)
+                and str(task.get("date") or "") == today_str
+                and not bool(task.get("done"))
+            )
+
+    return {
+        "month_diary_count": len(month_entries),
+        "month_diary_words": word_count(month_entries),
+        "month_diary_images": image_count(month_entries),
+        "month_completed_plans": sum(1 for plan in light_plans + action_plans if completed(plan) and updated_in(plan, month_prefix)),
+        "year_diary_count": len(year_entries),
+        "year_diary_words": word_count(year_entries),
+        "year_diary_images": image_count(year_entries),
+        "year_completed_plans": sum(1 for plan in light_plans + action_plans if completed(plan) and updated_in(plan, year_prefix)),
+        "action_plan_count": len(action_plans),
+        "active_action_plan_count": sum(1 for plan in action_plans if active(plan)),
+        "today_pending_tasks": today_pending,
     }
 
 
@@ -275,6 +352,104 @@ def save_entry(payload: dict[str, Any]) -> dict[str, Any]:
     metadata_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     (record_dir / "content.md").write_text(str(payload.get("body") or ""), encoding="utf-8")
     return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
+
+
+def image_metadata(value: Any) -> tuple[str, str] | None:
+    if isinstance(value, str):
+        return value, ""
+    if isinstance(value, dict):
+        file_name = str(value.get("file_name") or value.get("name") or "")
+        label = str(value.get("label") or "")
+        if file_name:
+            return file_name, label
+    return None
+
+
+def unique_image_name(images_dir: Path, original_name: str) -> str:
+    candidate = Path(original_name).name or "image"
+    stem = Path(candidate).stem or "image"
+    suffix = Path(candidate).suffix or ".png"
+    candidate = f"{stem}{suffix}"
+    counter = 1
+    while (images_dir / candidate).exists():
+        candidate = f"{stem}_{counter}{suffix}"
+        counter += 1
+    return candidate
+
+
+def add_entry_images(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    record_dir = DATA_ROOT / "entries" / entry_id
+    metadata_path = record_dir / "entry.json"
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"entry not found: {entry_id}")
+    images_dir = record_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    data = read_json(metadata_path)
+    images = list(data.get("images", [])) if isinstance(data.get("images"), list) else []
+    files = payload.get("files")
+    if not isinstance(files, list):
+        raise ValueError("files must be a list")
+
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        raw_data = str(item.get("data") or "")
+        if "," in raw_data and raw_data.startswith("data:"):
+            raw_data = raw_data.split(",", 1)[1]
+        content = base64.b64decode(raw_data)
+        file_name = unique_image_name(images_dir, str(item.get("name") or "image.png"))
+        (images_dir / file_name).write_bytes(content)
+        images.append({"file_name": file_name, "label": str(item.get("label") or "")})
+
+    data["images"] = images
+    data["updated_at"] = now_iso()
+    write_json(metadata_path, data)
+    return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
+
+
+def entry_image_path(entry_id: str, image_name: str) -> Path:
+    candidate = (DATA_ROOT / "entries" / entry_id / "images" / image_name).resolve()
+    images_root = (DATA_ROOT / "entries" / entry_id / "images").resolve()
+    if not str(candidate).startswith(str(images_root)):
+        raise ValueError("invalid image path")
+    if not candidate.exists():
+        raise FileNotFoundError(f"image not found: {image_name}")
+    return candidate
+
+
+def export_entry_word_pdf(entry_id: str) -> dict[str, str]:
+    record_dir = DATA_ROOT / "entries" / entry_id
+    metadata_path = record_dir / "entry.json"
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"entry not found: {entry_id}")
+    data = read_json(metadata_path)
+    body = (record_dir / str(data.get("body_file", "content.md"))).read_text(encoding="utf-8", errors="replace")
+    images = []
+    image_paths: list[Path] = []
+    for value in data.get("images", []):
+        parsed = image_metadata(value)
+        if not parsed:
+            continue
+        file_name, label = parsed
+        images.append(DiaryImage(file_name=file_name, label=label))
+        path = record_dir / "images" / file_name
+        if path.exists():
+            image_paths.append(path)
+    entry = DiaryEntry(
+        id=str(data.get("id") or entry_id),
+        date=str(data.get("date") or date.today().isoformat()),
+        title=str(data.get("title") or ""),
+        body=body,
+        created_at=str(data.get("created_at") or now_iso()),
+        updated_at=str(data.get("updated_at") or now_iso()),
+        images=images,
+    )
+    export_dir = DATA_ROOT / "exports"
+    exporter = DiaryExporter(export_dir)
+    docx_path, pdf_path = exporter.export_entries_word_and_pdf(
+        [DiaryExportItem(entry=entry, image_lookup=exporter._build_image_lookup(image_paths))]
+    )
+    return {"docx_path": str(docx_path), "pdf_path": str(pdf_path)}
 
 
 def save_resource(payload: dict[str, Any]) -> dict[str, Any]:
@@ -381,6 +556,14 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/overview":
             self.send_json(build_overview())
             return
+        image_match = re.fullmatch(r"/api/modules/entries/([^/]+)/images/(.+)", parsed.path)
+        if image_match:
+            try:
+                path = entry_image_path(unquote(image_match.group(1)), unquote(image_match.group(2)))
+                self.send_file(path)
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.NOT_FOUND, str(exc))
+            return
         if parsed.path.startswith("/api/modules/"):
             module_key = unquote(parsed.path.removeprefix("/api/modules/"))
             if module_key not in MODULE_BY_KEY:
@@ -396,6 +579,20 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/actions/open-data-root":
             os.startfile(DATA_ROOT)  # type: ignore[attr-defined]
             self.send_json({"ok": True})
+            return
+        image_match = re.fullmatch(r"/api/modules/entries/([^/]+)/images", parsed.path)
+        if image_match:
+            try:
+                self.send_json(add_entry_images(unquote(image_match.group(1)), self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        export_match = re.fullmatch(r"/api/modules/entries/([^/]+)/export", parsed.path)
+        if export_match:
+            try:
+                self.send_json(export_entry_word_pdf(unquote(export_match.group(1))))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return
         if not parsed.path.startswith("/api/modules/"):
             self.send_error(HTTPStatus.NOT_FOUND, "unknown endpoint")
@@ -440,6 +637,15 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def send_file(self, path: Path) -> None:
+        content = path.read_bytes()
+        mime = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
 
     def serve_frontend(self, request_path: str) -> None:
         if not FRONTEND_DIST.exists():

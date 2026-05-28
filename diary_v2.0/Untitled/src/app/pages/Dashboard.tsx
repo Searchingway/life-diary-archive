@@ -26,6 +26,20 @@ export function Dashboard() {
 
   const moduleCount = overview?.modules.reduce((sum, item) => sum + item.count, 0) ?? 0;
   const stats = overview?.modules ?? [];
+  const dashboardStats = overview?.dashboard_stats;
+  const basicStats = [
+    { label: "本月日记篇数", value: dashboardStats?.month_diary_count ?? 0 },
+    { label: "本月日记总字数", value: dashboardStats?.month_diary_words ?? 0 },
+    { label: "本月日记图片数", value: dashboardStats?.month_diary_images ?? 0 },
+    { label: "本月完成计划数", value: dashboardStats?.month_completed_plans ?? 0 },
+    { label: "今年日记篇数", value: dashboardStats?.year_diary_count ?? 0 },
+    { label: "今年日记总字数", value: dashboardStats?.year_diary_words ?? 0 },
+    { label: "今年日记图片数", value: dashboardStats?.year_diary_images ?? 0 },
+    { label: "今年完成计划数", value: dashboardStats?.year_completed_plans ?? 0 },
+    { label: "行动计划总数", value: dashboardStats?.action_plan_count ?? 0 },
+    { label: "进行中", value: dashboardStats?.active_action_plan_count ?? 0 },
+    { label: "今日待办任务", value: dashboardStats?.today_pending_tasks ?? 0 },
+  ];
 
   return (
     <div className="h-full overflow-y-auto">
@@ -66,21 +80,22 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-3 gap-4">
-          <Card>
-            <CardContent className="pt-6">
-              <p className="text-sm text-muted-foreground">2.0 本地记录</p>
-              <p className="text-3xl font-bold mt-2">{moduleCount}</p>
-              <p className="text-xs text-muted-foreground mt-1">条</p>
-            </CardContent>
-          </Card>
-          <Card className="col-span-2">
-            <CardContent className="pt-6">
-              <p className="text-sm text-muted-foreground">数据目录</p>
-              <p className="font-mono text-sm mt-2 break-all">{overview?.data_root || "diary_v2.0/data/Diary"}</p>
-            </CardContent>
-          </Card>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>基础统计</CardTitle>
+            <CardDescription>日记、图片、计划和今日任务的真实数据</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-4 gap-3">
+              {basicStats.map((item) => (
+                <div key={item.label} className="bg-secondary/60 rounded-lg p-4">
+                  <p className="text-sm">{item.label}</p>
+                  <p className="text-3xl font-bold mt-2 text-primary">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
         <div className="grid grid-cols-2 gap-6">
           <Card>
@@ -117,6 +132,22 @@ export function Dashboard() {
                   </div>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-3 gap-4">
+          <Card>
+            <CardContent className="pt-6">
+              <p className="text-sm text-muted-foreground">2.0 本地记录</p>
+              <p className="text-3xl font-bold mt-2">{moduleCount}</p>
+              <p className="text-xs text-muted-foreground mt-1">条</p>
+            </CardContent>
+          </Card>
+          <Card className="col-span-2">
+            <CardContent className="pt-6">
+              <p className="text-sm text-muted-foreground">数据目录</p>
+              <p className="font-mono text-sm mt-2 break-all">{overview?.data_root || "diary_v2.0/data/Diary"}</p>
             </CardContent>
           </Card>
         </div>
