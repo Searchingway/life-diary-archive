@@ -10,6 +10,7 @@ import {
   RecordItem,
   deleteRecord,
   exportAllEntries,
+  exportModuleTxt,
   listRecords,
   saveRecord,
   updateEntryImages,
@@ -176,6 +177,21 @@ export function RecordModulePage({
     }
   }
 
+  async function handleExportModuleTxt() {
+    setExporting(true);
+    try {
+      const result = await exportModuleTxt(moduleKey);
+      window.alert(
+        `${result.module_label ?? title}导出完成，共 ${result.count ?? ""} 条记录\n\n保存目录：${result.output_dir ?? ""}\nTXT：${result.txt_path ?? ""}`,
+      );
+      setMessage("已导出本板块 TXT");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "导出失败");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function deleteCurrent() {
     if (!selected?.id || readOnly) return;
     const confirmed = window.confirm(`确定删除这条${title}吗？`);
@@ -267,6 +283,10 @@ export function RecordModulePage({
               </div>
               {!readOnly && (
                 <div className="flex gap-2">
+                  <Button variant="outline" onClick={handleExportModuleTxt} disabled={exporting}>
+                    <Download className="size-4" />
+                    {exporting ? "导出中" : "导出 TXT"}
+                  </Button>
                   {moduleKey === "entries" && (
                     <>
                       <Button variant="outline" onClick={handleExportAllEntries} disabled={exporting}>

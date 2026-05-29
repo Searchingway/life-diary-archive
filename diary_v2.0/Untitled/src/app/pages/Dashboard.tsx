@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { BookOpen, Database, FileText, PlusCircle, Sparkles, Target } from "lucide-react";
 import { Overview, getOverview } from "../lib/api";
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [message, setMessage] = useState("正在读取 2.0 数据");
 
@@ -56,23 +58,23 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-5 gap-3">
-              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2">
+              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2" onClick={() => navigate("/diary?new=1")}>
                 <BookOpen className="size-5" />
                 <span className="text-xs">写日记</span>
               </Button>
-              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2">
+              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2" onClick={() => navigate("/info-memo?new=order")}>
                 <FileText className="size-5" />
                 <span className="text-xs">新信息备忘</span>
               </Button>
-              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2">
+              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2" onClick={() => navigate("/light-plan?new=1")}>
                 <Target className="size-5" />
                 <span className="text-xs">新轻计划</span>
               </Button>
-              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2">
+              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2" onClick={() => navigate("/action-plan?new=1&type=schedule")}>
                 <Sparkles className="size-5" />
                 <span className="text-xs">AI 拆解</span>
               </Button>
-              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2">
+              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2" onClick={() => navigate("/data-management")}>
                 <Database className="size-5" />
                 <span className="text-xs">数据管理</span>
               </Button>

@@ -9,6 +9,7 @@ from typing import Callable, Iterable
 
 from docx import Document
 from docx.enum.text import WD_BREAK
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
@@ -153,6 +154,7 @@ finally {
             text=True,
             timeout=180,
             env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
         callback(95, "完成 PDF 转换")
@@ -186,8 +188,9 @@ finally {
         title = document.add_heading(entry.display_title, level=0)
         self._set_run_font(title.runs, size=Pt(18), bold=True)
 
+        word_count = len(entry.body.strip())
         meta = document.add_paragraph()
-        meta.add_run(f"日期：{entry.date}")
+        meta.add_run(f"日期：{entry.date}    字数：{word_count}")
         self._set_run_font(meta.runs, size=Pt(10))
 
         document.add_paragraph("")
@@ -215,27 +218,23 @@ finally {
             self._set_run_font(heading.runs, size=Pt(14), bold=True)
 
             for image, image_path in exportable_images:
-                if image.label.strip():
-                    caption = document.add_paragraph(image.label.strip())
-                    self._set_run_font(caption.runs, size=Pt(11), bold=True)
-                    # Keep caption with the next paragraph (the image)
-                else:
-                    caption = None
+                table = document.add_table(rows=1, cols=1)
+                self._remove_table_borders(table)
+                self._set_row_cant_split(table.rows[0])
+                cell = table.cell(0, 0)
 
-                # Add image, scaled to fit A4 width
-                img_para = document.add_paragraph()
+                caption = cell.paragraphs[0]
+                caption.add_run(image.label.strip() or image.file_name)
+                self._set_run_font(caption.runs, size=Pt(11), bold=True)
+                self._set_keep_with_next(caption)
+
+                img_para = cell.add_paragraph()
                 try:
-                    doc_image = img_para.add_run().add_picture(str(image_path), width=Cm(15.5))
+                    img_para.add_run().add_picture(str(image_path), width=Cm(14.8))
                 except Exception:
                     img_para.add_run("（图片无法加载）")
-
-                # Set keep_with_next on the caption so it stays with the image
-                if caption is not None:
-                    self._set_keep_with_next(caption)
-                # Keep image lines together on one page
                 self._set_keep_lines(img_para)
-                # Keep image with the following paragraph
-                self._set_keep_with_next(img_para)
+                document.add_paragraph("")
 
     def _build_base_name(self, export_items: list[DiaryExportItem], export_all: bool = False) -> str:
         if export_all:
@@ -304,3 +303,21 @@ finally {
         if keep is None:
             keep = pPr.makeelement(qn("w:keepLines"), {})
             pPr.append(keep)
+
+    def _set_row_cant_split(self, row) -> None:
+        tr_pr = row._tr.get_or_add_trPr()
+        if tr_pr.find(qn("w:cantSplit")) is None:
+            tr_pr.append(OxmlElement("w:cantSplit"))
+
+    def _remove_table_borders(self, table) -> None:
+        tbl_pr = table._tbl.tblPr
+        borders = tbl_pr.first_child_found_in("w:tblBorders")
+        if borders is None:
+            borders = OxmlElement("w:tblBorders")
+            tbl_pr.append(borders)
+        for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            element = borders.find(qn(f"w:{edge}"))
+            if element is None:
+                element = OxmlElement(f"w:{edge}")
+                borders.append(element)
+            element.set(qn("w:val"), "nil")

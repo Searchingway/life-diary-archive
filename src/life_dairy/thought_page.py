@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -18,6 +19,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .ai_dialogs import AIPreviewDialog
+from .ai_service import call_ai_json
 from .autosave import AutoSaveMixin
 from .plan_storage import PlanStorage
 from .thought_storage import THOUGHT_STATUSES, THOUGHT_TYPES, ThoughtEntry, ThoughtStorage
@@ -104,9 +107,12 @@ class ThoughtPage(AutoSaveMixin, QWidget):
         self.reload_button.clicked.connect(self.reload_current_thought)
         self.to_plan_button = QPushButton("转成轻计划", widget)
         self.to_plan_button.clicked.connect(self.convert_to_plan)
+        self.ai_button = QPushButton("AI 整理思考", widget)
+        self.ai_button.clicked.connect(self.ai_organize_thought)
         action_row.addWidget(self.save_button)
         action_row.addWidget(self.reload_button)
         action_row.addWidget(self.to_plan_button)
+        action_row.addWidget(self.ai_button)
         action_row.addStretch(1)
 
         info_group = QGroupBox("思考整理", widget)
@@ -410,6 +416,80 @@ class ThoughtPage(AutoSaveMixin, QWidget):
             or self.notes_edit.toPlainText().strip()
             or self.current_thought.ideas
         )
+
+    def ai_organize_thought(self) -> None:
+        thought = self._read_form()
+        has_content = bool(
+            thought.title.strip()
+            or thought.description.strip()
+            or thought.ideas
+        )
+
+        system_prompt = (
+            "你是思考整理助手。根据用户提供的思考内容，帮助整理和分析。"
+            "只返回 JSON，不要有其他文字。JSON 字段：\n"
+            "- problem_restatement: 问题重述\n"
+            "- possible_options: 可能选项(字符串列表)\n"
+            "- risks: 风险点(字符串列表)\n"
+            "- supporting_reasons: 支持理由(字符串列表)\n"
+            "- opposing_reasons: 反对理由(字符串列表)\n"
+            "- preliminary_conclusion: 初步结论\n"
+            "- next_action: 下一步行动\n"
+        )
+
+        user_prompt = ""
+        if thought.title:
+            user_prompt += f"标题/问题: {thought.title}\n"
+        if thought.description:
+            user_prompt += f"描述: {thought.description}\n"
+        if thought.ideas:
+            idea_texts = [item.get("text", "") for item in thought.ideas]
+            user_prompt += "已有想法:\n" + "\n".join(f"- {t}" for t in idea_texts if t) + "\n"
+        if not user_prompt.strip():
+            user_prompt = "（当前思考为空，请先生成内容再使用 AI 整理）"
+
+        try:
+            result = call_ai_json(str(self.storage.root_dir), system_prompt, user_prompt)
+        except Exception as exc:
+            QMessageBox.warning(self, "AI 调用失败", str(exc))
+            return
+
+        preview_lines = [
+            f"问题重述: {result.get('problem_restatement', '')}",
+            f"可能选项: {', '.join(result.get('possible_options', []))}",
+            f"风险点: {', '.join(result.get('risks', []))}",
+            f"支持理由: {', '.join(result.get('supporting_reasons', []))}",
+            f"反对理由: {', '.join(result.get('opposing_reasons', []))}",
+            f"初步结论: {result.get('preliminary_conclusion', '')}",
+            f"下一步行动: {result.get('next_action', '')}",
+        ]
+
+        dialog = AIPreviewDialog(
+            "AI 整理思考 — 预览",
+            "\n".join(preview_lines),
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.is_confirmed:
+            return
+
+        all_ideas_text = "\n\n".join(
+            f"【{k}】\n{v}" if isinstance(v, str) else f"【{k}】\n" + "\n".join(f"- {x}" for x in v)
+            for k, v in result.items()
+            if k not in ("preliminary_conclusion",) and v
+        )
+        if all_ideas_text:
+            thought.ideas.append({"time": thought.created_at or self.storage.create_empty_thought().created_at, "text": f"AI 整理:\n{all_ideas_text}"})
+
+        conclusion = str(result.get("preliminary_conclusion", ""))
+        if conclusion:
+            if thought.preliminary_conclusion:
+                thought.preliminary_conclusion += "\n\n" + conclusion
+            else:
+                thought.preliminary_conclusion = conclusion
+
+        self._fill_form(thought)
+        self._set_dirty(True)
+        self._show_status("已应用 AI 整理内容，请确认后保存。", 5000)
 
     def _show_status(self, message: str, timeout: int = 3000) -> None:
         window = self.window()

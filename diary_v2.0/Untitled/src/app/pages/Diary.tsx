@@ -9,6 +9,7 @@ import {
   RecordItem,
   classifyEntryImages,
   exportAllEntries,
+  exportAllEntriesTxt,
   listRecords,
   saveRecord,
   updateEntryImages,
@@ -32,6 +33,14 @@ function weekdayText(value: string) {
 
 function formatDate(value: string) {
   return value ? `${value} ${weekdayText(value)}` : "";
+}
+
+function sortDiaryRecords(items: RecordItem[]) {
+  return [...items].sort((a, b) => {
+    const dateOrder = String(b.date || "").localeCompare(String(a.date || ""));
+    if (dateOrder !== 0) return dateOrder;
+    return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+  });
 }
 
 function imagesOf(record: RecordItem | null): EntryImage[] {
@@ -75,6 +84,7 @@ export function Diary() {
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("正在读取日记");
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [classifyOpen, setClassifyOpen] = useState(false);
   const selectedRef = useRef<RecordItem | null>(null);
   selectedRef.current = selected;
@@ -83,31 +93,46 @@ export function Diary() {
   const wordCount = selected?.body?.length ?? 0;
 
   async function load(keyword = "") {
-    const data = await listRecords("entries", keyword);
+    const data = sortDiaryRecords(await listRecords("entries", keyword));
     setRecords(data);
     setSelected((current) => (current?.id ? data.find((item) => item.id === current.id) ?? data[0] ?? null : data[0] ?? null));
+    setDirty(false);
     setMessage(`已读取 ${data.length} 篇日记`);
   }
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new")) {
+      listRecords("entries")
+        .then((data) => {
+          setRecords(sortDiaryRecords(data));
+          setSelected(newDiary());
+          setDirty(false);
+          setMessage("已创建日记草稿");
+        })
+        .catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
+      return;
+    }
     load("").catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
   }, []);
 
   function patch(patchValue: Partial<RecordItem>) {
+    setDirty(true);
     setSelected((current) => (current ? { ...current, ...patchValue } : current));
   }
 
   function updateRecordList(record: RecordItem) {
     setRecords((items) => {
       const index = items.findIndex((item) => item.id === record.id);
-      if (index < 0) return [record, ...items.filter((item) => item.id)];
-      return items.map((item) => (item.id === record.id ? { ...item, ...record } : item));
+      const next = index < 0 ? [record, ...items.filter((item) => item.id)] : items.map((item) => (item.id === record.id ? { ...item, ...record } : item));
+      return sortDiaryRecords(next);
     });
   }
 
-  async function saveCurrent(reason = "已自动保存") {
+  async function saveCurrent(reason = "已保存", force = false) {
     const current = selectedRef.current;
     if (!current || (!current.id && !current.title.trim() && !current.body.trim())) return current;
+    if (!force && !dirty) return current;
     setSaving(true);
     try {
       const saved = await saveRecord("entries", current);
@@ -117,7 +142,8 @@ export function Diary() {
         setSelected(next);
       }
       updateRecordList(next);
-      setMessage(`${reason} ${new Date().toLocaleTimeString()}`);
+      setDirty(false);
+      setMessage(reason);
       return next;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
@@ -128,16 +154,16 @@ export function Diary() {
   }
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selected || !dirty) return;
     const timer = window.setTimeout(() => {
       saveCurrent();
-    }, 2000);
+    }, 2800);
     return () => window.clearTimeout(timer);
-  }, [selected?.id, selected?.title, selected?.body, selected?.date]);
+  }, [selected?.id, selected?.title, selected?.body, selected?.date, dirty]);
 
   async function uploadImages(files: File[]) {
     let target = selectedRef.current;
-    if (!target?.id) target = await saveCurrent("已创建日记");
+    if (!target?.id) target = await saveCurrent("已创建日记", true);
     if (!target?.id) return;
     const saved = await uploadEntryImages(target.id, await filesToPayload(files));
     setSelected(saved);
@@ -149,14 +175,23 @@ export function Diary() {
   async function commitImages(nextImages: EntryImage[]) {
     const current = selectedRef.current;
     if (!current?.id) return;
-    const saved = await updateEntryImages(
-      current.id,
-      nextImages.map((image) => ({ file_name: image.file_name, label: image.label || "" })),
-    );
-    setSelected(saved);
-    selectedRef.current = saved;
-    updateRecordList(saved);
-    setMessage(`图片已保存 ${new Date().toLocaleTimeString()}`);
+    const optimistic = { ...current, extra: { ...(current.extra ?? {}), images: nextImages } };
+    selectedRef.current = optimistic;
+    setSelected(optimistic);
+    updateRecordList(optimistic);
+    try {
+      const saved = await updateEntryImages(
+        current.id,
+        nextImages.map((image) => ({ file_name: image.file_name, label: image.label || "" })),
+      );
+      const next = { ...optimistic, updated_at: saved.updated_at };
+      selectedRef.current = next;
+      setSelected(next);
+      updateRecordList(next);
+      setMessage("图片已保存");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "图片保存失败");
+    }
   }
 
   async function exportAll() {
@@ -165,6 +200,15 @@ export function Diary() {
       window.alert(`已全部导出 ${result.count ?? ""} 篇日记\n\n目录：${result.output_dir}\nWord：${result.docx_path}\nPDF：${result.pdf_path}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "导出失败");
+    }
+  }
+
+  async function exportTxt() {
+    try {
+      const result = await exportAllEntriesTxt();
+      window.alert(`已全部导出 ${result.count ?? ""} 篇日记为 TXT\n\n目录：${result.output_dir}\nTXT：${result.txt_path}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "导出 TXT 失败");
     }
   }
 
@@ -189,13 +233,15 @@ export function Diary() {
               onKeyDown={(event) => event.key === "Enter" && load(query)}
             />
           </div>
-          <p className="text-xs text-muted-foreground">{message}</p>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {records.map((record) => (
             <button
               key={record.id}
-              onClick={() => setSelected(record)}
+              onClick={() => {
+                setDirty(false);
+                setSelected(record);
+              }}
               className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
                 selected?.id === record.id ? "bg-primary text-primary-foreground" : "hover:bg-accent"
               }`}
@@ -220,8 +266,7 @@ export function Diary() {
                   onChange={(event) => patch({ title: event.target.value })}
                 />
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">{saving ? "保存中" : message}</span>
-                  <Button variant="outline" size="sm" onClick={() => saveCurrent("已手动保存")}>
+                  <Button variant="outline" size="sm" onClick={() => saveCurrent("已手动保存", true)} disabled={saving}>
                     <Save className="size-4" />
                     保存
                   </Button>
@@ -244,7 +289,11 @@ export function Diary() {
             <ImageManager
               images={images}
               onUpload={uploadImages}
-              onChange={(nextImages) => patch({ extra: { ...(selected.extra ?? {}), images: nextImages } })}
+              onChange={(nextImages) => {
+                const next = { ...selected, extra: { ...(selected.extra ?? {}), images: nextImages } };
+                selectedRef.current = next;
+                setSelected(next);
+              }}
               onCommit={commitImages}
               extraAction={
                 <Button variant="outline" size="sm" disabled={!selected.id || images.length === 0} onClick={() => setClassifyOpen(true)}>
@@ -256,6 +305,10 @@ export function Diary() {
               <Button variant="outline" size="sm" onClick={exportAll}>
                 <Download className="size-4" />
                 全部导出 Word / PDF
+              </Button>
+              <Button variant="outline" size="sm" onClick={exportTxt}>
+                <Download className="size-4" />
+                全部导出 TXT
               </Button>
             </div>
             {classifyOpen && selected.id && (
@@ -310,13 +363,24 @@ function ClassifyDialog({
         <div className="grid grid-cols-2 gap-4">
           <label className="space-y-2">
             <span className="text-sm text-muted-foreground">足迹</span>
-            <select className="h-10 rounded-md border bg-background px-3" value={footprintId} onChange={(event) => setFootprintId(event.target.value)}>
-              {footprints.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.title}
-                </option>
-              ))}
-            </select>
+            <div className="max-h-28 overflow-y-auto rounded-md border bg-background p-1">
+              {footprints.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-muted-foreground">暂无足迹</div>
+              ) : (
+                footprints.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`w-full rounded px-3 py-2 text-left text-sm transition-colors ${
+                      footprintId === item.id ? "bg-primary text-primary-foreground" : "hover:bg-accent"
+                    }`}
+                    onClick={() => setFootprintId(item.id)}
+                  >
+                    {item.title || "未命名足迹"}
+                  </button>
+                ))
+              )}
+            </div>
           </label>
           <label className="space-y-2">
             <span className="text-sm text-muted-foreground">日期</span>

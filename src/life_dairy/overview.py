@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
+from .action_plan_storage import ActionPlanStorage
 from .book_storage import BookStorage
 from .footprint_storage import FootprintStorage
 from .info_memo_storage import InfoMemoStorage
@@ -28,6 +29,9 @@ class OverviewStats:
     year_diary_chars: int = 0
     year_diary_images: int = 0
     year_completed_plans: int = 0
+    action_plan_count: int = 0
+    action_plan_in_progress: int = 0
+    today_action_tasks: int = 0
     module_counts: dict[str, int] | None = None
     latest_updates: dict[str, str] | None = None
 
@@ -60,6 +64,7 @@ class OverviewService:
         observation_storage: ObservationStorage | None = None,
         info_memo_storage: InfoMemoStorage | None = None,
         note_storage: NoteStorage | None = None,
+        action_plan_storage: ActionPlanStorage | None = None,
     ):
         self.diary_storage = diary_storage
         self.footprint_storage = footprint_storage
@@ -73,6 +78,7 @@ class OverviewService:
         self.observation_storage = observation_storage
         self.info_memo_storage = info_memo_storage
         self.note_storage = note_storage
+        self.action_plan_storage = action_plan_storage
 
     def build_stats(self, today: date | None = None) -> OverviewStats:
         current = today or date.today()
@@ -102,6 +108,14 @@ class OverviewService:
             if plan_date.startswith(year_prefix):
                 stats.year_completed_plans += 1
 
+        if self.action_plan_storage is not None:
+            today_str = current.isoformat()
+            for ap in self.action_plan_storage.list_plans():
+                stats.action_plan_count += 1
+                if ap.status == "进行中":
+                    stats.action_plan_in_progress += 1
+                stats.today_action_tasks += len([t for t in ap.tasks if t.date == today_str and not t.done])
+
         stats.module_counts, stats.latest_updates = self.build_module_summary()
         return stats
 
@@ -119,6 +133,7 @@ class OverviewService:
         items.extend(self._observation_items())
         items.extend(self._info_memo_items())
         items.extend(self._note_items())
+        items.extend(self._action_plan_items())
         items.sort(key=lambda item: (item.date or "", item.sort_key, item.title), reverse=True)
         return items[:limit]
 
@@ -135,6 +150,7 @@ class OverviewService:
             ("自我观察", self._safe_list(self.observation_storage.list_observations if self.observation_storage else None)),
             ("信息备忘", self._safe_list(self.info_memo_storage.list_info_memos if self.info_memo_storage else None)),
             ("笔记", self._safe_list(self.note_storage.list_notes if self.note_storage else None)),
+            ("行动计划", self._safe_list(self.action_plan_storage.list_plans if self.action_plan_storage else None)),
         ]
         counts: dict[str, int] = {}
         latest: dict[str, str] = {}
@@ -310,6 +326,29 @@ class OverviewService:
             )
             for note in self.note_storage.list_notes()
         ]
+
+    def _action_plan_items(self) -> list[TimelineItem]:
+        if self.action_plan_storage is None:
+            return []
+        items: list[TimelineItem] = []
+        for ap in self.action_plan_storage.list_plans():
+            items.append(
+                TimelineItem(
+                    record_type="行动计划",
+                    record_id=ap.id,
+                    date=ap.start_date or self._date_from_iso(ap.updated_at),
+                    title=ap.display_title,
+                    summary=self._summary(
+                        f"{ap.plan_type} | {ap.priority} | "
+                        f"进度 {ap.progress}% | "
+                        f"{len([t for t in ap.tasks if t.done])}/{len(ap.tasks)} 任务完成"
+                    ),
+                    status=f"{ap.status} | {ap.progress}%",
+                    source_module="action_plans",
+                    sort_key=ap.updated_at,
+                ),
+            )
+        return items
 
     def _observation_items(self) -> list[TimelineItem]:
         if self.observation_storage is None:

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Film, Plus, Search } from "lucide-react";
+import { Download, Film, Plus, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
-import { RecordItem, listRecords, saveRecord } from "../lib/api";
+import { RecordItem, exportModuleTxt, listRecords, saveRecord } from "../lib/api";
 
 function draftWork(): RecordItem {
   return {
@@ -41,6 +41,16 @@ export function WorksReflection() {
     setSelected(saved);
     setWorks((items) => (items.some((item) => item.id === saved.id) ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items]));
     setMessage("作品感悟已保存");
+  }
+
+  async function exportWorks() {
+    try {
+      const result = await exportModuleTxt("works");
+      window.alert(`作品感悟导出完成，共 ${result.count ?? ""} 条记录\n\n目录：${result.output_dir}\nTXT：${result.txt_path}`);
+      setMessage("作品感悟已导出 TXT");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "作品感悟导出失败");
+    }
   }
 
   return (
@@ -112,7 +122,13 @@ export function WorksReflection() {
                   </label>
                 </div>
               </div>
-              <Button onClick={saveSelected}>保存</Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={exportWorks}>
+                  <Download className="size-4" />
+                  导出 TXT
+                </Button>
+                <Button onClick={saveSelected}>保存</Button>
+              </div>
             </div>
 
             <Card className="border-2">

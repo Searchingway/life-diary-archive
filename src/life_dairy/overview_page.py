@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QGridLayout,
@@ -56,6 +58,7 @@ class OverviewPage(QWidget):
 
         layout.addLayout(header_row)
         layout.addWidget(self._build_stats_group())
+        layout.addWidget(self._build_action_plan_group())
         layout.addWidget(self._build_module_group())
         layout.addWidget(self._build_timeline_group(), 1)
         outer.addWidget(make_scroll_area(content))
@@ -75,6 +78,9 @@ class OverviewPage(QWidget):
             ("year_diary_chars", "今年日记总字数"),
             ("year_diary_images", "今年日记图片数"),
             ("year_completed_plans", "今年完成计划数"),
+            ("action_plan_count", "行动计划总数"),
+            ("action_plan_in_progress", "进行中"),
+            ("today_action_tasks", "今日待办任务"),
         ]
         for index, (key, label_text) in enumerate(items):
             row = index // 4
@@ -91,6 +97,15 @@ class OverviewPage(QWidget):
             self.stat_labels[key] = value
             grid.addWidget(cell, row, column)
 
+        return group
+
+    def _build_action_plan_group(self) -> QWidget:
+        group = QGroupBox("今日行动任务", self)
+        layout = QVBoxLayout(group)
+        self.today_task_list = QListWidget(group)
+        self.today_task_list.setMaximumHeight(120)
+        self.today_task_list.itemDoubleClicked.connect(self._open_today_task_plan)
+        layout.addWidget(self.today_task_list)
         return group
 
     def _build_module_group(self) -> QWidget:
@@ -112,6 +127,7 @@ class OverviewPage(QWidget):
     def refresh_overview(self) -> None:
         stats = self.service.build_stats()
         self._fill_stats(stats)
+        self._fill_today_tasks()
         self._fill_timeline(self.service.build_timeline(30))
         self._show_status("总览已刷新。", 3000)
 
@@ -127,6 +143,29 @@ class OverviewPage(QWidget):
                 self.module_list.addItem(f"{name}：{count} 条，最近更新 {latest_text}")
             if self.module_list.count() == 0:
                 self.module_list.addItem("暂无模块统计。")
+
+    def _fill_today_tasks(self) -> None:
+        self.today_task_list.clear()
+        if self.service.action_plan_storage is None:
+            self.today_task_list.addItem("暂无行动计划模块。")
+            return
+        today_str = date.today().isoformat()
+        found = False
+        for ap in self.service.action_plan_storage.list_plans():
+            if ap.status in ("已完成", "放弃"):
+                continue
+            for task in ap.tasks:
+                if task.date == today_str and not task.done:
+                    text = f"【{ap.display_title}】{task.title}"
+                    if task.estimated_minutes:
+                        text += f" ({task.estimated_minutes}分钟)"
+                    item = QListWidgetItem(text)
+                    item.setData(Qt.ItemDataRole.UserRole, ap.id)
+                    item.setToolTip(ap.id)
+                    self.today_task_list.addItem(item)
+                    found = True
+        if not found:
+            self.today_task_list.addItem("今日无待办任务。")
 
     def _fill_timeline(self, items: list[TimelineItem]) -> None:
         self.timeline_list.clear()
@@ -151,6 +190,11 @@ class OverviewPage(QWidget):
             return
         source_module, record_id = data
         self.open_record_requested.emit(str(source_module), str(record_id))
+
+    def _open_today_task_plan(self, item: QListWidgetItem) -> None:
+        plan_id = item.data(Qt.ItemDataRole.UserRole)
+        if plan_id:
+            self.open_record_requested.emit("action_plans", str(plan_id))
 
     def _show_status(self, message: str, timeout: int = 3000) -> None:
         window = self.window()

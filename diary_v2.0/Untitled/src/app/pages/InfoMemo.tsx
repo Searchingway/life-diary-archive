@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { FileText, Plus, Search } from "lucide-react";
+import { Download, FileText, Plus, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
-import { RecordItem, listRecords, saveRecord } from "../lib/api";
+import { RecordItem, exportModuleTxt, listRecords, saveRecord } from "../lib/api";
 
 const orderTemplate = {
   customer: "",
@@ -46,6 +46,17 @@ export function InfoMemo() {
   }
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new")) {
+      listRecords("info_memos")
+        .then((data) => {
+          setMemos(data);
+          setSelected(draftMemo());
+          setMessage("已创建接单备忘草稿");
+        })
+        .catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
+      return;
+    }
     load("").catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
   }, []);
 
@@ -62,6 +73,16 @@ export function InfoMemo() {
     setSelected(saved);
     setMemos((items) => (items.some((item) => item.id === saved.id) ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items]));
     setMessage("信息备忘已保存");
+  }
+
+  async function exportMemos() {
+    try {
+      const result = await exportModuleTxt("info_memos");
+      window.alert(`信息备忘导出完成，共 ${result.count ?? ""} 条记录\n\n目录：${result.output_dir}\nTXT：${result.txt_path}`);
+      setMessage("信息备忘已导出 TXT");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "信息备忘导出失败");
+    }
   }
 
   return (
@@ -117,7 +138,13 @@ export function InfoMemo() {
                 placeholder="项目 / 订单名称"
                 onChange={(event) => setSelected({ ...selected, title: event.target.value })}
               />
-              <Button onClick={saveSelected}>保存</Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={exportMemos}>
+                  <Download className="size-4" />
+                  导出 TXT
+                </Button>
+                <Button onClick={saveSelected}>保存</Button>
+              </div>
             </div>
 
             <Card>

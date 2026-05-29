@@ -4,6 +4,8 @@ from PySide6.QtCore import QDate, QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
+    QDialog,
+    QDialogButtonBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -19,6 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .ai_dialogs import AIPreviewDialog
+from .ai_service import call_ai_json
 from .autosave import AutoSaveMixin
 from .models import PlanItem
 from .plan_storage import PLAN_TYPE_LABELS, PLAN_TYPE_VALUES, SUBTRACT_MODES, PlanStorage
@@ -27,6 +31,7 @@ from .ui_helpers import make_scroll_area
 
 class PlanPage(AutoSaveMixin, QWidget):
     dirty_state_changed = Signal(bool)
+    action_plan_created = Signal(str)
 
     def __init__(self, storage: PlanStorage, parent: QWidget | None = None):
         super().__init__(parent)
@@ -103,9 +108,15 @@ class PlanPage(AutoSaveMixin, QWidget):
         self.reload_button.clicked.connect(self.reload_current_plan)
         self.done_button = QPushButton("标记完成", widget)
         self.done_button.clicked.connect(self.mark_done)
+        self.ai_button = QPushButton("AI 补全计划", widget)
+        self.ai_button.clicked.connect(self.ai_complete_plan)
+        self.ai_decompose_button = QPushButton("AI 拆解为行动计划", widget)
+        self.ai_decompose_button.clicked.connect(self.ai_decompose_to_action_plan)
         action_row.addWidget(self.save_button)
         action_row.addWidget(self.reload_button)
         action_row.addWidget(self.done_button)
+        action_row.addWidget(self.ai_button)
+        action_row.addWidget(self.ai_decompose_button)
         action_row.addStretch(1)
 
         form = QFormLayout()
@@ -441,7 +452,287 @@ class PlanPage(AutoSaveMixin, QWidget):
             or self.alternative_action_edit.toPlainText().strip()
         )
 
+    def ai_complete_plan(self) -> None:
+        plan = self._read_form()
+        has_content = bool(
+            plan.title.strip()
+            or plan.notes.strip()
+            or plan.tags
+            or plan.trigger_scene.strip()
+            or plan.avoid_behavior.strip()
+        )
+
+        system_prompt = (
+            "你是个人计划助手。根据用户提供的轻计划信息，生成结构化的计划草稿。"
+            "只返回 JSON，不要有其他文字。JSON 字段：\n"
+            "- title: 优化后的计划标题\n"
+            "- plan_type: 只能是 'add'(加法计划) 或 'subtract'(减法计划)\n"
+            "- priority: 低/普通/高\n"
+            "- status: 未开始/进行中/搁置\n"
+            "- notes: 简要描述\n"
+            "- suggested_steps: 建议步骤(字符串列表，3-5条)\n"
+            "- risks: 可能的风险点(字符串列表)\n"
+            "- next_action: 下一步行动(单行文字)\n"
+            "- tags: 建议标签(字符串列表)\n"
+            "- subtract_mode: 如果是减法计划，填 少做/不做/暂停/戒断，否则留空\n"
+            "- trigger_scene: 如果是减法计划填触发场景，否则留空\n"
+            "- avoid_behavior: 如果是减法计划填避免行为，否则留空\n"
+            "- reason: 如果是减法计划填原因，否则留空\n"
+            "- alternative_action: 如果是减法计划填替代行为，否则留空\n"
+        )
+
+        current_info_parts = []
+        if plan.title:
+            current_info_parts.append(f"当前标题: {plan.title}")
+        if plan.notes:
+            current_info_parts.append(f"当前备注: {plan.notes}")
+        if plan.tags:
+            current_info_parts.append(f"当前标签: {', '.join(plan.tags)}")
+        if plan.plan_type == "subtract":
+            current_info_parts.append(f"当前是减法计划")
+            if plan.trigger_scene:
+                current_info_parts.append(f"触发场景: {plan.trigger_scene}")
+            if plan.avoid_behavior:
+                current_info_parts.append(f"避免行为: {plan.avoid_behavior}")
+
+        user_prompt = "请根据以下信息补全计划:\n"
+        if current_info_parts:
+            user_prompt += "\n".join(current_info_parts)
+        else:
+            user_prompt += "（当前表单为空，请生成一个合理的计划草稿。）"
+
+        try:
+            result = call_ai_json(str(self.storage.root_dir), system_prompt, user_prompt)
+        except Exception as exc:
+            QMessageBox.warning(self, "AI 调用失败", str(exc))
+            return
+
+        preview_lines = [
+            f"标题: {result.get('title', '')}",
+            f"类型: {result.get('plan_type', 'add')}",
+            f"优先级: {result.get('priority', '普通')}",
+            f"状态: {result.get('status', '未开始')}",
+            f"描述: {result.get('notes', '')}",
+            f"建议步骤: {', '.join(result.get('suggested_steps', []))}",
+            f"风险点: {', '.join(result.get('risks', []))}",
+            f"下一步行动: {result.get('next_action', '')}",
+            f"标签: {', '.join(result.get('tags', []))}",
+        ]
+        if result.get("plan_type") == "subtract":
+            preview_lines.append(f"减法模式: {result.get('subtract_mode', '')}")
+            preview_lines.append(f"触发场景: {result.get('trigger_scene', '')}")
+            preview_lines.append(f"避免行为: {result.get('avoid_behavior', '')}")
+
+        warning = ""
+        if has_content:
+            warning = "注意：当前表单已有内容，确认应用将覆盖现有字段。"
+
+        dialog = AIPreviewDialog(
+            "AI 补全计划 — 预览",
+            "\n".join(preview_lines),
+            warning=warning,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.is_confirmed:
+            return
+
+        plan.title = str(result.get("title", plan.title))
+        plan_type = str(result.get("plan_type", "add"))
+        if plan_type in ("add", "subtract"):
+            plan.plan_type = plan_type
+        plan.priority = str(result.get("priority", plan.priority))
+        plan.status = str(result.get("status", plan.status))
+        plan.notes = str(result.get("notes", plan.notes))
+        plan.tags = [str(t).strip() for t in result.get("tags", []) if str(t).strip()]
+
+        if plan.plan_type == "subtract":
+            plan.subtract_mode = str(result.get("subtract_mode", ""))
+            plan.trigger_scene = str(result.get("trigger_scene", ""))
+            plan.avoid_behavior = str(result.get("avoid_behavior", ""))
+            plan.reason = str(result.get("reason", ""))
+            plan.alternative_action = str(result.get("alternative_action", ""))
+
+        suggested_steps = result.get("suggested_steps", [])
+        risks = result.get("risks", [])
+        next_action = result.get("next_action", "")
+        extra_parts = []
+        if suggested_steps:
+            extra_parts.append("建议步骤:\n" + "\n".join(f"- {s}" for s in suggested_steps))
+        if risks:
+            extra_parts.append("风险点:\n" + "\n".join(f"- {r}" for r in risks))
+        if next_action:
+            extra_parts.append(f"下一步行动: {next_action}")
+        if extra_parts:
+            if plan.notes:
+                plan.notes += "\n\n"
+            plan.notes += "\n\n".join(extra_parts)
+
+        self._fill_form(plan)
+        self._set_dirty(True)
+        self._show_status("已应用 AI 补全内容，请确认后保存。", 5000)
+
+    def ai_decompose_to_action_plan(self) -> None:
+        from .action_plan_storage import ActionPlanStorage
+
+        plan = self._read_form()
+        if not plan.title.strip():
+            QMessageBox.warning(self, "缺少标题", "请先填写计划标题，再使用 AI 拆解。")
+            return
+
+        dialog = _DecomposeDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        start_date = dialog.start_date
+        end_date = dialog.end_date
+        daily_time = dialog.daily_time
+
+        system_prompt = (
+            "你是项目计划助手。根据用户提供的轻计划信息和时间约束，生成按日期排列的任务列表。"
+            "只返回 JSON，不要有其他文字。JSON 格式：\n"
+            '{"title": "计划标题", "plan_type": "学习/接单/项目/生活/身体/武术/情绪/长期目标/其他",'
+            '"description": "简要描述", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD",'
+            '"daily_available_time": "每日可用时间", "priority": "高/普通/低",'
+            '"tasks": [{"date": "YYYY-MM-DD", "title": "任务标题", "estimated_minutes": 30, "note": "备注"}]}\n'
+            "任务要在 start_date 和 end_date 之间均匀分布。"
+        )
+
+        user_prompt = (
+            f"轻计划标题: {plan.title}\n"
+            f"描述: {plan.notes or '无'}\n"
+            f"类型: {PLAN_TYPE_LABELS.get(plan.plan_type, '加法计划')}\n"
+            f"优先级: {plan.priority}\n"
+            f"开始日期: {start_date}\n"
+            f"截止日期: {end_date}\n"
+            f"每日可用时间: {daily_time}\n\n"
+            "请拆解为按日期排列的行动计划任务。"
+        )
+
+        try:
+            result = call_ai_json(str(self.storage.root_dir), system_prompt, user_prompt, temperature=0.3)
+        except Exception as exc:
+            QMessageBox.warning(self, "AI 调用失败", str(exc))
+            return
+
+        tasks = result.get("tasks", [])
+        if not tasks:
+            QMessageBox.warning(self, "AI 返回为空", "AI 未生成任何任务，请调整计划描述后重试。")
+            return
+
+        preview_lines = [
+            f"标题: {result.get('title', plan.title)}",
+            f"类型: {result.get('plan_type', '项目')}",
+            f"描述: {result.get('description', '')}",
+            f"开始: {result.get('start_date', start_date)}",
+            f"截止: {result.get('end_date', end_date)}",
+            f"每日可用: {result.get('daily_available_time', daily_time)}",
+            f"优先级: {result.get('priority', '普通')}",
+            f"任务数: {len(tasks)}",
+            "",
+        ]
+        for i, t in enumerate(tasks, 1):
+            preview_lines.append(
+                f"  {i}. [{t.get('date', '')}] {t.get('title', '')}"
+                f" ({t.get('estimated_minutes', 0)}分钟)"
+            )
+            if t.get("note"):
+                preview_lines.append(f"     备注: {t.get('note', '')}")
+
+        dialog2 = AIPreviewDialog(
+            "AI 拆解为行动计划 — 预览",
+            "\n".join(preview_lines),
+            parent=self,
+        )
+        if dialog2.exec() != QDialog.DialogCode.Accepted or not dialog2.is_confirmed:
+            return
+
+        storage = ActionPlanStorage(self.storage.root_dir)
+        action_plan = storage.create_empty_plan()
+        action_plan.title = str(result.get("title", plan.title))
+        action_plan.plan_type = str(result.get("plan_type", "项目"))
+        action_plan.description = str(result.get("description", ""))
+        action_plan.start_date = str(result.get("start_date", start_date))
+        action_plan.end_date = str(result.get("end_date", end_date))
+        action_plan.daily_available_time = str(result.get("daily_available_time", daily_time))
+        action_plan.priority = str(result.get("priority", "普通"))
+        action_plan.status = "未开始"
+        action_plan.source_light_plan_id = plan.id
+
+        from uuid import uuid4 as _uuid4
+
+        for t in tasks:
+            from .action_plan_storage import ActionPlanTask as APTask
+
+            action_plan.tasks.append(
+                APTask(
+                    id=_uuid4().hex,
+                    title=str(t.get("title", "")),
+                    date=str(t.get("date", start_date)),
+                    estimated_minutes=int(t.get("estimated_minutes", 30)),
+                    done=False,
+                    note=str(t.get("note", "")),
+                )
+            )
+
+        saved = storage.save_plan(action_plan)
+        self.action_plan_created.emit(saved.id)
+        self._show_status("已创建行动计划！", 5000)
+
     def _show_status(self, message: str, timeout: int = 3000) -> None:
         window = self.window()
         if hasattr(window, "statusBar"):
             window.statusBar().showMessage(message, timeout)
+
+
+class _DecomposeDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("AI 拆解 — 时间设置")
+        self.setMinimumWidth(400)
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        from PySide6.QtCore import QDate as _QDate
+
+        self.start_edit = QDateEdit(_QDate.currentDate(), self)
+        self.start_edit.setCalendarPopup(True)
+        self.start_edit.setDisplayFormat("yyyy-MM-dd")
+
+        self.end_edit = QDateEdit(_QDate.currentDate().addDays(7), self)
+        self.end_edit.setCalendarPopup(True)
+        self.end_edit.setDisplayFormat("yyyy-MM-dd")
+
+        self.daily_time_input = QLineEdit(self)
+        self.daily_time_input.setPlaceholderText("例如: 1小时")
+
+        form.addRow("开始日期", self.start_edit)
+        form.addRow("截止日期", self.end_edit)
+        form.addRow("每日可用时间", self.daily_time_input)
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            self,
+        )
+        buttons.accepted.connect(self._validate_and_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _validate_and_accept(self) -> None:
+        if self.start_edit.date() > self.end_edit.date():
+            QMessageBox.warning(self, "日期错误", "开始日期不能晚于截止日期。")
+            return
+        self.accept()
+
+    @property
+    def start_date(self) -> str:
+        return self.start_edit.date().toString("yyyy-MM-dd")
+
+    @property
+    def end_date(self) -> str:
+        return self.end_edit.date().toString("yyyy-MM-dd")
+
+    @property
+    def daily_time(self) -> str:
+        return self.daily_time_input.text().strip() or "1小时"

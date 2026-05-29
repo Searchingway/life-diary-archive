@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { Activity, AlertTriangle, Database, Download, FileCheck, FolderOpen } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { AppSettings, Overview, getOverview, getSettings, openDataRoot, selectExportDirectory } from "../lib/api";
+import { AppSettings, Overview, exportAllModules, getOverview, getSettings, openDataRoot, selectExportDirectory } from "../lib/api";
 
 export function DataManagement() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState("正在检查数据");
 
   useEffect(() => {
@@ -34,6 +35,19 @@ export function DataManagement() {
       setMessage("导出位置已保存");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "选择导出位置失败");
+    }
+  }
+
+  async function handleExportAll() {
+    setExporting(true);
+    try {
+      const result = await exportAllModules();
+      window.alert(`全部导出完成，共 ${result.count ?? 0} 条记录\n\n目录：${result.output_dir ?? ""}\n原始数据 ZIP：${result.zip_path ?? ""}`);
+      setMessage("全部板块已导出");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "全部导出失败");
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -85,10 +99,16 @@ export function DataManagement() {
             <div className="p-4 bg-secondary rounded-lg font-mono text-sm break-all">
               {settings?.export_dir || `${overview?.data_root || "diary_v2.0/data/Diary"}\\exports`}
             </div>
-            <Button variant="outline" onClick={handleSelectExportDir}>
+            <div className="flex flex-wrap gap-3">
+              <Button variant="outline" onClick={handleSelectExportDir}>
               <FolderOpen className="size-4" />
               选择导出位置
-            </Button>
+              </Button>
+              <Button onClick={handleExportAll} disabled={exporting}>
+                <Download className="size-4" />
+                {exporting ? "导出中" : "全部导出"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 

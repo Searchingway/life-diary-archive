@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowRight, CheckCircle, Plus, Search, Sparkles, Target } from "lucide-react";
+import { ArrowRight, CheckCircle, Download, Plus, Search, Sparkles, Target } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
-import { RecordItem, listRecords, promoteLightPlan, saveRecord } from "../lib/api";
+import { RecordItem, exportModuleTxt, listRecords, promoteLightPlan, saveRecord } from "../lib/api";
 
 function draftPlan(): RecordItem {
   return {
@@ -28,6 +28,7 @@ export function LightPlan() {
   const [filter, setFilter] = useState<"all" | "add" | "reduce" | "completed">("all");
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("正在读取轻计划");
+  const selectedPlanType = String(selected?.extra?.plan_type || selected?.type || "add");
 
   async function load(keyword = query) {
     const data = await listRecords("plans", keyword);
@@ -36,6 +37,17 @@ export function LightPlan() {
   }
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new")) {
+      listRecords("plans")
+        .then((data) => {
+          setPlans(data);
+          setSelected(draftPlan());
+          setMessage("已创建轻计划草稿");
+        })
+        .catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
+      return;
+    }
     load("").catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
   }, []);
 
@@ -65,6 +77,16 @@ export function LightPlan() {
     await promoteLightPlan(target.id);
     setMessage("已迁移到行动计划");
     navigate("/action-plan");
+  }
+
+  async function exportPlans() {
+    try {
+      const result = await exportModuleTxt("plans");
+      window.alert(`轻计划导出完成，共 ${result.count ?? ""} 条记录\n\n目录：${result.output_dir}\nTXT：${result.txt_path}`);
+      setMessage("轻计划已导出 TXT");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "轻计划导出失败");
+    }
   }
 
   return (
@@ -135,18 +157,34 @@ export function LightPlan() {
                   onChange={(event) => setSelected({ ...selected, title: event.target.value })}
                 />
                 <div className="flex items-center gap-2">
-                  <select
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
-                    value={String(selected.extra?.plan_type || selected.type || "add")}
-                    onChange={(event) => setSelected({ ...selected, type: event.target.value, extra: { ...(selected.extra ?? {}), plan_type: event.target.value } })}
-                  >
-                    <option value="add">增量计划</option>
-                    <option value="reduce">减量计划</option>
-                  </select>
+                  <div className="flex h-11 rounded-lg border bg-background p-1 shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={selectedPlanType === "add" || selectedPlanType.includes("增") ? "default" : "ghost"}
+                      className="h-8"
+                      onClick={() => setSelected({ ...selected, type: "add", extra: { ...(selected.extra ?? {}), plan_type: "add" } })}
+                    >
+                      增量计划
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={selectedPlanType === "reduce" || selectedPlanType.includes("减") ? "default" : "ghost"}
+                      className="h-8"
+                      onClick={() => setSelected({ ...selected, type: "reduce", extra: { ...(selected.extra ?? {}), plan_type: "reduce" } })}
+                    >
+                      减量计划
+                    </Button>
+                  </div>
                   <Input className="w-40" value={selected.date || ""} onChange={(event) => setSelected({ ...selected, date: event.target.value })} />
                 </div>
               </div>
               <div className="flex gap-2">
+                <Button variant="outline" onClick={exportPlans}>
+                  <Download className="size-4" />
+                  导出 TXT
+                </Button>
                 <Button variant="outline" onClick={saveSelected}>
                   保存
                 </Button>

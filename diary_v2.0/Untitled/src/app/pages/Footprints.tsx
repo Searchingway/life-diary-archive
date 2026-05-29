@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Calendar, MapPin, Plus, Search } from "lucide-react";
+import { Calendar, Download, MapPin, Plus, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
@@ -9,6 +9,7 @@ import {
   EntryImage,
   FootprintVisit,
   RecordItem,
+  exportFootprintsWord,
   listRecords,
   saveFootprintVisit,
   saveRecord,
@@ -71,6 +72,16 @@ export function Footprints() {
     setPlaces((items) => items.map((item) => (item.id === saved.id ? saved : item)));
   }
 
+  async function exportFootprints() {
+    try {
+      const result = await exportFootprintsWord();
+      window.alert(`足迹 Word 导出完成，共 ${result.count ?? ""} 条记录\n\n目录：${result.output_dir}\nWord：${result.docx_path}`);
+      setMessage("足迹已导出 Word");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "足迹导出失败");
+    }
+  }
+
   async function uploadVisitImages(visit: FootprintVisit, files: File[]) {
     if (!selected?.id) return;
     const saved = await uploadFootprintVisitImages(selected.id, visit.id, await filesToPayload(files));
@@ -81,14 +92,21 @@ export function Footprints() {
 
   async function commitVisitImages(visit: FootprintVisit, images: EntryImage[]) {
     if (!selected?.id) return;
-    const saved = await updateFootprintVisitImages(
-      selected.id,
-      visit.id,
-      images.map((image) => ({ file_name: image.file_name, label: image.label || "" })),
-    );
-    setSelected(saved);
-    setPlaces((items) => items.map((item) => (item.id === saved.id ? saved : item)));
-    setMessage("足迹图片已保存");
+    const nextVisits = visits.map((item) => (item.id === visit.id ? { ...item, images } : item));
+    const optimistic = { ...selected, extra: { ...(selected.extra ?? {}), visits: nextVisits } };
+    setSelected(optimistic);
+    setPlaces((items) => items.map((item) => (item.id === optimistic.id ? optimistic : item)));
+    try {
+      const saved = await updateFootprintVisitImages(
+        selected.id,
+        visit.id,
+        images.map((image) => ({ file_name: image.file_name, label: image.label || "" })),
+      );
+      setPlaces((items) => items.map((item) => (item.id === saved.id ? { ...optimistic, updated_at: saved.updated_at } : item)));
+      setMessage("足迹图片已保存");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "足迹图片保存失败");
+    }
   }
 
   return (
@@ -152,9 +170,15 @@ export function Footprints() {
                     />
                     <p className="text-muted-foreground">共访问 {visits.length} 次</p>
                   </div>
-                  <Button variant="outline" onClick={() => savePlace({ body: selected.body })}>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={exportFootprints}>
+                      <Download className="size-4" />
+                      导出 Word
+                    </Button>
+                    <Button variant="outline" onClick={() => savePlace({ body: selected.body })}>
                     保存地点
-                  </Button>
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>

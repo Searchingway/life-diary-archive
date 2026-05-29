@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
@@ -19,6 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .ai_dialogs import AIPreviewDialog
+from .ai_service import call_ai_json
 from .autosave import AutoSaveMixin
 from .lesson_storage import LessonStorage
 from .plan_storage import PlanStorage
@@ -125,10 +128,13 @@ class ResourcePage(AutoSaveMixin, QWidget):
         self.to_plan_button.clicked.connect(self.convert_to_plan)
         self.to_lesson_button = QPushButton("复制为教训反思", widget)
         self.to_lesson_button.clicked.connect(self.copy_to_lesson)
+        self.ai_button = QPushButton("AI 评估资源", widget)
+        self.ai_button.clicked.connect(self.ai_evaluate_resource)
         action_row.addWidget(self.save_button)
         action_row.addWidget(self.reload_button)
         action_row.addWidget(self.to_plan_button)
         action_row.addWidget(self.to_lesson_button)
+        action_row.addWidget(self.ai_button)
         action_row.addStretch(1)
 
         info_group = QGroupBox("资源判断", widget)
@@ -590,6 +596,119 @@ class ResourcePage(AutoSaveMixin, QWidget):
             or self.notes_edit.toPlainText().strip()
             or self.current_resource.resource_items
         )
+
+    def ai_evaluate_resource(self) -> None:
+        resource = self._read_form()
+        has_content = bool(
+            resource.title.strip()
+            or resource.description.strip()
+            or resource.resource_items
+        )
+
+        system_prompt = (
+            "你是资源评估助手。根据用户提供的资源信息，帮助评估是否值得投入。"
+            "只返回 JSON，不要有其他文字。JSON 字段：\n"
+            "- time_cost: 时间成本分析\n"
+            "- money_cost: 金钱成本分析\n"
+            "- energy_cost: 精力成本分析\n"
+            "- emotion_cost: 情绪成本分析\n"
+            "- risk: 风险评估\n"
+            "- opportunity_cost: 机会成本\n"
+            "- overall_judgement: 总体判断\n"
+            "- recurrence_next_week: 轮回测试-下周还愿意吗\n"
+            "- recurrence_one_year: 轮回测试-持续一年的结果\n"
+            "- recurrence_repeat: 轮回测试-主动重复意愿\n"
+            "- worth_it: 是否值得做\n"
+        )
+
+        user_prompt = ""
+        if resource.title:
+            user_prompt += f"标题: {resource.title}\n"
+        if resource.description:
+            user_prompt += f"描述: {resource.description}\n"
+        if resource.resource_type:
+            user_prompt += f"类型: {resource.resource_type}\n"
+        if resource.resource_items:
+            items_text = "\n".join(f"- {self._describe_item(item)}" for item in resource.resource_items)
+            user_prompt += f"已有资源项:\n{items_text}\n"
+        if not user_prompt.strip():
+            user_prompt = "（当前资源为空，请先生成内容再使用 AI 评估）"
+
+        try:
+            result = call_ai_json(str(self.storage.root_dir), system_prompt, user_prompt)
+        except Exception as exc:
+            QMessageBox.warning(self, "AI 调用失败", str(exc))
+            return
+
+        preview_lines = [
+            f"时间成本: {result.get('time_cost', '')}",
+            f"金钱成本: {result.get('money_cost', '')}",
+            f"精力成本: {result.get('energy_cost', '')}",
+            f"情绪成本: {result.get('emotion_cost', '')}",
+            f"风险: {result.get('risk', '')}",
+            f"机会成本: {result.get('opportunity_cost', '')}",
+            f"总体判断: {result.get('overall_judgement', '')}",
+            f"轮回测试-下周: {result.get('recurrence_next_week', '')}",
+            f"轮回测试-一年: {result.get('recurrence_one_year', '')}",
+            f"轮回测试-重复: {result.get('recurrence_repeat', '')}",
+            f"是否值得: {result.get('worth_it', '')}",
+        ]
+
+        warning = ""
+        if has_content:
+            warning = "注意：当前表单已有内容，确认应用将覆盖现有字段。"
+
+        dialog = AIPreviewDialog(
+            "AI 评估资源 — 预览",
+            "\n".join(preview_lines),
+            warning=warning,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.is_confirmed:
+            return
+
+        judgement = str(result.get("overall_judgement", ""))
+        if judgement:
+            resource.overall_judgement = judgement
+
+        resource.recurrence_test = {
+            "next_week": str(result.get("recurrence_next_week", "")),
+            "one_year": str(result.get("recurrence_one_year", "")),
+            "repeat_willingness": str(result.get("recurrence_repeat", "")),
+        }
+
+        worth_it = str(result.get("worth_it", ""))
+        if worth_it and not resource.notes:
+            resource.notes = f"AI 评估: {worth_it}"
+        elif worth_it:
+            resource.notes += f"\n\nAI 评估: {worth_it}"
+
+        cost_summary = "\n".join(
+            f"{k}: {v}"
+            for k, v in [
+                ("时间成本", result.get("time_cost", "")),
+                ("金钱成本", result.get("money_cost", "")),
+                ("精力成本", result.get("energy_cost", "")),
+                ("情绪成本", result.get("emotion_cost", "")),
+            ]
+            if v
+        )
+        if cost_summary:
+            resource.description = resource.description or ""
+            if resource.description:
+                resource.description += "\n\n"
+            resource.description += f"AI 成本分析:\n{cost_summary}"
+
+        risk = str(result.get("risk", ""))
+        if risk:
+            resource.notes = resource.notes or ""
+            if resource.notes:
+                resource.notes += "\n\n"
+            resource.notes += f"风险: {risk}"
+
+        self._fill_form(resource)
+        self._set_dirty(True)
+        self._show_status("已应用 AI 评估内容，请确认后保存。", 5000)
 
     def _show_status(self, message: str, timeout: int = 3000) -> None:
         window = self.window()

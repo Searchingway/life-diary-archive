@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Brain, Calendar, CheckCircle, Plus, Search, Trash2 } from "lucide-react";
+import { Brain, Calendar, CheckCircle, Download, Plus, Search, Trash2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
-import { RecordItem, listRecords, saveRecord } from "../lib/api";
+import { RecordItem, exportModuleTxt, listRecords, saveRecord } from "../lib/api";
 
 interface Task {
   id: string;
@@ -16,7 +16,7 @@ interface Task {
   note?: string;
 }
 
-function newPlan(): RecordItem {
+function newPlan(planType = "普通行动计划"): RecordItem {
   return {
     id: "",
     title: "",
@@ -24,9 +24,9 @@ function newPlan(): RecordItem {
     body: "",
     date: new Date().toISOString().slice(0, 10),
     updated_at: "",
-    type: "普通行动计划",
+    type: planType,
     status: "进行中",
-    extra: { plan_type: "普通行动计划", tasks: [] },
+    extra: { plan_type: planType, tasks: [] },
   };
 }
 
@@ -58,6 +58,18 @@ export function ActionPlan() {
   }
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new")) {
+      const planType = params.get("type") === "schedule" ? "日程型行动计划" : "普通行动计划";
+      listRecords("action_plans")
+        .then((data) => {
+          setPlans(data);
+          setSelected(newPlan(planType));
+          setMessage("已创建行动计划草稿");
+        })
+        .catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
+      return;
+    }
     load("").catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
   }, []);
 
@@ -76,6 +88,16 @@ export function ActionPlan() {
     setSelected(saved);
     setPlans((items) => (items.some((item) => item.id === saved.id) ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items]));
     setMessage(`已保存 ${new Date().toLocaleTimeString()}`);
+  }
+
+  async function exportActionPlans() {
+    try {
+      const result = await exportModuleTxt("action_plans");
+      window.alert(`行动计划导出完成，共 ${result.count ?? ""} 条记录\n\n目录：${result.output_dir}\nTXT：${result.txt_path}`);
+      setMessage("行动计划已导出 TXT");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "行动计划导出失败");
+    }
   }
 
   function addTask() {
@@ -167,19 +189,32 @@ export function ActionPlan() {
                     onChange={(event) => patch({ title: event.target.value })}
                   />
                   <div className="flex items-center gap-3">
-                    <select
-                      className="h-9 rounded-md border bg-background px-3 text-sm"
-                      value={String(selected.extra?.plan_type || selected.type || "普通行动计划")}
-                      onChange={(event) => patch({ type: event.target.value, extra: { ...(selected.extra ?? {}), plan_type: event.target.value, tasks } })}
-                    >
-                      <option value="普通行动计划">普通行动计划</option>
-                      <option value="日程型行动计划">日程型行动计划</option>
-                    </select>
+                    <div className="flex h-10 rounded-lg border bg-background p-1 shrink-0">
+                      {["普通行动计划", "日程型行动计划"].map((planType) => {
+                        const active = String(selected.extra?.plan_type || selected.type || "普通行动计划") === planType;
+                        return (
+                          <Button
+                            key={planType}
+                            type="button"
+                            size="sm"
+                            variant={active ? "default" : "ghost"}
+                            className="h-8"
+                            onClick={() => patch({ type: planType, extra: { ...(selected.extra ?? {}), plan_type: planType, tasks } })}
+                          >
+                            {planType}
+                          </Button>
+                        );
+                      })}
+                    </div>
                     <Input className="w-40" value={selected.date || ""} onChange={(event) => patch({ date: event.target.value })} />
                     <span className="text-sm text-muted-foreground">{completed}/{tasks.length} 子任务完成</span>
                   </div>
                 </div>
                 <div className="flex gap-2">
+                  <Button variant="outline" onClick={exportActionPlans}>
+                    <Download className="size-4" />
+                    导出 TXT
+                  </Button>
                   <Button variant="outline" onClick={addTask}>
                     <Plus className="size-4" />
                     子任务

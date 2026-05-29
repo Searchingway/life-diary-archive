@@ -78,10 +78,16 @@ export interface ImageUploadFile {
 }
 
 export interface ExportResult {
-  docx_path: string;
-  pdf_path: string;
+  docx_path?: string;
+  pdf_path?: string;
   count?: number;
   output_dir?: string;
+  txt_path?: string;
+  zip_path?: string;
+  manifest_path?: string;
+  module_key?: ModuleKey;
+  module_label?: string;
+  files?: Array<{ module_key: ModuleKey; module_label: string; txt_path?: string; docx_path?: string; count: number }>;
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -212,6 +218,30 @@ export function promoteLightPlan(planId: string): Promise<RecordItem> {
 
 export function exportAllEntries(): Promise<ExportResult> {
   return request<ExportResult>("/api/modules/entries/export-all", {
+    method: "POST",
+  });
+}
+
+export function exportAllEntriesTxt(): Promise<ExportResult> {
+  return request<ExportResult>("/api/modules/entries/export-txt", {
+    method: "POST",
+  });
+}
+
+export function exportModuleTxt(moduleKey: ModuleKey): Promise<ExportResult> {
+  return request<ExportResult>(`/api/modules/${moduleKey}/export-txt`, {
+    method: "POST",
+  });
+}
+
+export function exportFootprintsWord(): Promise<ExportResult> {
+  return request<ExportResult>("/api/modules/footprints/export-word", {
+    method: "POST",
+  });
+}
+
+export function exportAllModules(): Promise<ExportResult> {
+  return request<ExportResult>("/api/export/all", {
     method: "POST",
   });
 }

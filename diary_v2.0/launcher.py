@@ -11,6 +11,7 @@ import sys
 import threading
 import uuid
 import webbrowser
+import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime
 from http import HTTPStatus
@@ -18,6 +19,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
+
+from docx import Document
+from docx.enum.text import WD_BREAK
+from docx.shared import Cm, Pt
 
 sys.path.insert(0, str((Path(__file__).resolve().parent.parent / "src").resolve()))
 
@@ -269,7 +274,13 @@ def list_module_records(module_key: str, query: str = "") -> list[dict[str, Any]
             continue
         records.append(record)
 
-    records.sort(key=lambda item: str(item.get("updated_at") or item.get("date") or ""), reverse=True)
+    if module_key == "entries":
+        records.sort(
+            key=lambda item: (str(item.get("date") or ""), str(item.get("updated_at") or "")),
+            reverse=True,
+        )
+    else:
+        records.sort(key=lambda item: str(item.get("updated_at") or item.get("date") or ""), reverse=True)
     return records
 
 
@@ -541,6 +552,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         text=True,
         timeout=300,
         env=env,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     selected = (result.stdout or "").strip().splitlines()
     if result.returncode != 0:
@@ -583,6 +595,400 @@ def export_all_entries_word_pdf(payload: dict[str, Any] | None = None) -> dict[s
     return {
         "docx_path": str(docx_path),
         "pdf_path": str(pdf_path),
+        "output_dir": str(output_dir),
+        "count": len(export_items),
+    }
+
+
+def safe_export_name(raw: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\\\|?*]+', "_", raw)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._")
+    return cleaned[:100] or "diary_export"
+
+
+def unique_output_path(target: Path) -> Path:
+    if not target.exists():
+        return target
+    counter = 1
+    while True:
+        candidate = target.with_name(f"{target.stem}_{counter}{target.suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def unique_output_dir(target: Path) -> Path:
+    if not target.exists():
+        return target
+    counter = 1
+    while True:
+        candidate = target.with_name(f"{target.name}_{counter}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def format_extra_value(value: Any, indent: str = "") -> list[str]:
+    lines: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if item in (None, "", [], {}):
+                continue
+            if isinstance(item, (dict, list)):
+                lines.append(f"{indent}{key}:")
+                lines.extend(format_extra_value(item, indent + "  "))
+            else:
+                lines.append(f"{indent}{key}: {item}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value, start=1):
+            if isinstance(item, (dict, list)):
+                lines.append(f"{indent}{index}.")
+                lines.extend(format_extra_value(item, indent + "  "))
+            elif item not in (None, ""):
+                lines.append(f"{indent}{index}. {item}")
+    elif value not in (None, ""):
+        lines.append(f"{indent}{value}")
+    return lines
+
+
+def module_record_export_lines(module: ModuleConfig, record: dict[str, Any], index: int) -> list[str]:
+    body = str(record.get("body") or "").strip()
+    lines = [
+        f"{index}. {record.get('title') or '未命名记录'}",
+        f"日期：{record.get('date') or '未设置'}",
+        f"类型：{record.get('type') or record.get('subtitle') or module.label}",
+        f"状态：{record.get('status') or '未设置'}",
+        f"更新时间：{record.get('updated_at') or '未设置'}",
+        f"字数：{len(body)}",
+        "",
+        body or "（正文为空）",
+    ]
+
+    extra = record.get("extra") if isinstance(record.get("extra"), dict) else {}
+    detail_lines: list[str] = []
+    if module.key == "footprints":
+        visits = extra.get("visits") if isinstance(extra.get("visits"), list) else []
+        for visit in visits:
+            if not isinstance(visit, dict):
+                continue
+            detail_lines.append(f"- {visit.get('date') or '未设置日期'}")
+            thought = str(visit.get("thought") or "").strip()
+            if thought:
+                detail_lines.append(f"  感想：{thought}")
+            images = visit.get("images") if isinstance(visit.get("images"), list) else []
+            if images:
+                names = []
+                for image in images:
+                    parsed = image_metadata(image)
+                    if parsed:
+                        file_name, label = parsed
+                        names.append(label or file_name)
+                if names:
+                    detail_lines.append(f"  图片：{'、'.join(names)}")
+    elif module.key == "action_plans":
+        tasks = extra.get("tasks") if isinstance(extra.get("tasks"), list) else []
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            mark = "完成" if task.get("done") else "未完成"
+            title = str(task.get("title") or "未命名子任务")
+            task_date = str(task.get("date") or "").strip()
+            task_time = str(task.get("time") or "").strip()
+            note = str(task.get("note") or "").strip()
+            detail_lines.append(f"- [{mark}] {title} {task_date} {task_time}".rstrip())
+            if note:
+                detail_lines.append(f"  备注：{note}")
+    elif module.key == "resources":
+        resource_items = extra.get("resource_items") if isinstance(extra.get("resource_items"), list) else []
+        for item in resource_items:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("type") or item.get("label") or "").strip()
+            value = str(item.get("value") or item.get("description") or "").strip()
+            if label or value:
+                detail_lines.append(f"- {label or '资源'}：{value}")
+        judgement = str(extra.get("overall_judgement") or "").strip()
+        if judgement:
+            detail_lines.append(f"- 综合判断：{judgement}")
+    elif module.key == "info_memos":
+        fields = extra.get("type_fields") if isinstance(extra.get("type_fields"), dict) else {}
+        detail_lines.extend(format_extra_value(fields))
+    else:
+        images = extra.get("images") if isinstance(extra.get("images"), list) else []
+        if images:
+            names = []
+            for image in images:
+                parsed = image_metadata(image)
+                if parsed:
+                    file_name, label = parsed
+                    names.append(label or file_name)
+            if names:
+                detail_lines.append(f"图片：{'、'.join(names)}")
+
+    if detail_lines:
+        lines.extend(["", "补充信息：", *detail_lines])
+    lines.extend(["", "-" * 48, ""])
+    return lines
+
+
+def export_module_txt(module_key: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    if module_key not in MODULE_BY_KEY:
+        raise ValueError(f"未知导出模块：{module_key}")
+    module = MODULE_BY_KEY[module_key]
+    output_text = str((payload or {}).get("output_dir") or "").strip()
+    output_dir = Path(output_text).expanduser().resolve() if output_text else configured_export_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    records = list_module_records(module_key)
+    if not records:
+        raise ValueError(f"没有可导出的{module.label}记录")
+
+    txt_path = unique_output_path(output_dir / f"{safe_export_name(f'{module.label}_{len(records)}条记录')}.txt")
+    lines = [f"{module.label}导出", f"导出时间：{now_iso()}", f"记录数：{len(records)}", ""]
+    for index, record in enumerate(records, start=1):
+        lines.extend(module_record_export_lines(module, record, index))
+    txt_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return {
+        "module_key": module.key,
+        "module_label": module.label,
+        "txt_path": str(txt_path),
+        "output_dir": str(output_dir),
+        "count": len(records),
+    }
+
+
+def set_docx_runs_font(paragraph: Any, size: int = 11, bold: bool = False) -> None:
+    for run in paragraph.runs:
+        run.font.name = "宋体"
+        run.font.size = Pt(size)
+        run.bold = bold
+
+
+def add_docx_paragraph(document: Any, text: str = "", size: int = 11, bold: bool = False) -> Any:
+    paragraph = document.add_paragraph(text)
+    set_docx_runs_font(paragraph, size=size, bold=bold)
+    return paragraph
+
+
+def footprint_image_file(place_id: str, visit_id: str, image_name: str) -> Path | None:
+    try:
+        return footprint_visit_image_path(place_id, visit_id, image_name)
+    except Exception:
+        return None
+
+
+def append_footprint_record_to_docx(document: Any, record: dict[str, Any], include_page_break: bool = False) -> None:
+    if include_page_break:
+        document.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+
+    place_id = str(record.get("id") or "")
+    title = str(record.get("title") or "未命名足迹")
+    heading = document.add_heading(title, level=0)
+    set_docx_runs_font(heading, size=18, bold=True)
+
+    body = str(record.get("body") or "").strip()
+    add_docx_paragraph(document, f"地点记录数：{len(record.get('extra', {}).get('visits', []) if isinstance(record.get('extra'), dict) else [])}", size=10)
+    if record.get("date"):
+        add_docx_paragraph(document, f"日期：{record.get('date')}", size=10)
+    if body:
+        add_docx_paragraph(document, "地点描述", size=13, bold=True)
+        for line in body.splitlines():
+            add_docx_paragraph(document, line, size=11)
+
+    extra = record.get("extra") if isinstance(record.get("extra"), dict) else {}
+    visits = extra.get("visits") if isinstance(extra.get("visits"), list) else []
+    if not visits:
+        add_docx_paragraph(document, "（暂无访问记录）", size=11)
+        return
+
+    for visit in visits:
+        if not isinstance(visit, dict):
+            continue
+        visit_id = str(visit.get("id") or "")
+        visit_date = str(visit.get("date") or visit.get("visit_date") or "未设置日期")
+        date_heading = document.add_heading(visit_date, level=1)
+        set_docx_runs_font(date_heading, size=14, bold=True)
+
+        thought = str(visit.get("thought") or visit.get("reflection") or "").strip()
+        if thought:
+            for line in thought.splitlines():
+                add_docx_paragraph(document, line, size=11)
+        else:
+            add_docx_paragraph(document, "（本次访问暂无文字记录）", size=11)
+
+        images = visit.get("images") if isinstance(visit.get("images"), list) else []
+        exportable_images: list[tuple[str, Path]] = []
+        for image in images:
+            parsed = image_metadata(image)
+            if not parsed:
+                continue
+            file_name, label = parsed
+            image_path = footprint_image_file(place_id, visit_id, file_name)
+            if image_path and image_path.exists():
+                exportable_images.append((label or file_name, image_path))
+
+        if exportable_images:
+            add_docx_paragraph(document, "图片", size=12, bold=True)
+            for caption_text, image_path in exportable_images:
+                table = document.add_table(rows=1, cols=1)
+                cell = table.cell(0, 0)
+                caption = cell.paragraphs[0]
+                caption.add_run(caption_text)
+                set_docx_runs_font(caption, size=10, bold=True)
+                image_paragraph = cell.add_paragraph()
+                try:
+                    image_paragraph.add_run().add_picture(str(image_path), width=Cm(14.8))
+                except Exception:
+                    image_paragraph.add_run("（图片无法加载）")
+                document.add_paragraph("")
+
+
+def export_footprints_word(payload: dict[str, Any] | None = None, output_dir: Path | None = None) -> dict[str, Any]:
+    target_dir = output_dir
+    if target_dir is None:
+        output_text = str((payload or {}).get("output_dir") or "").strip()
+        target_dir = Path(output_text).expanduser().resolve() if output_text else configured_export_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    records = list_module_records("footprints")
+    if not records:
+        raise ValueError("没有可导出的足迹记录")
+
+    docx_path = unique_output_path(target_dir / f"{safe_export_name(f'足迹_{len(records)}条记录')}.docx")
+    document = Document()
+    document.styles["Normal"].font.name = "宋体"
+    document.styles["Normal"].font.size = Pt(11)
+    title = document.add_heading("足迹导出", level=0)
+    set_docx_runs_font(title, size=20, bold=True)
+    add_docx_paragraph(document, f"导出时间：{now_iso()}", size=10)
+    add_docx_paragraph(document, f"地点数：{len(records)}", size=10)
+
+    for index, record in enumerate(records, start=1):
+        append_footprint_record_to_docx(document, record, include_page_break=index > 1)
+
+    document.save(docx_path)
+    return {
+        "module_key": "footprints",
+        "module_label": MODULE_BY_KEY["footprints"].label,
+        "docx_path": str(docx_path),
+        "output_dir": str(target_dir),
+        "count": len(records),
+    }
+
+
+def zip_raw_data(target_dir: Path) -> Path:
+    zip_path = unique_output_path(target_dir / "2.0原始数据.zip")
+    exports_root = (DATA_ROOT / "exports").resolve()
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in DATA_ROOT.rglob("*"):
+            if not path.is_file():
+                continue
+            resolved = path.resolve()
+            if str(resolved).startswith(str(exports_root)):
+                continue
+            archive.write(path, path.relative_to(DATA_ROOT))
+    return zip_path
+
+
+def export_all_modules(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    output_text = str((payload or {}).get("output_dir") or "").strip()
+    output_dir = Path(output_text).expanduser().resolve() if output_text else configured_export_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    package_dir = unique_output_dir(output_dir / f"全部板块导出_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    package_dir.mkdir(parents=True, exist_ok=True)
+
+    files: list[dict[str, Any]] = []
+    total = 0
+    for module in MODULES:
+        if module.key == "notes":
+            continue
+        records = list_module_records(module.key)
+        txt_path = package_dir / f"{safe_export_name(module.label)}.txt"
+        lines = [f"{module.label}导出", f"导出时间：{now_iso()}", f"记录数：{len(records)}", ""]
+        if records:
+            for index, record in enumerate(records, start=1):
+                lines.extend(module_record_export_lines(module, record, index))
+        else:
+            lines.append("暂无数据")
+        txt_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        total += len(records)
+        files.append({"module_key": module.key, "module_label": module.label, "txt_path": str(txt_path), "count": len(records)})
+        if module.key == "footprints" and records:
+            footprint_word = export_footprints_word(output_dir=package_dir)
+            files.append(
+                {
+                    "module_key": module.key,
+                    "module_label": module.label,
+                    "docx_path": footprint_word["docx_path"],
+                    "count": len(records),
+                }
+            )
+
+    zip_path = zip_raw_data(package_dir)
+    manifest_path = package_dir / "导出说明.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "exported_at": now_iso(),
+                "data_root": str(DATA_ROOT),
+                "total_records": total,
+                "files": files,
+                "raw_data_zip": str(zip_path),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "output_dir": str(package_dir),
+        "count": total,
+        "files": files,
+        "zip_path": str(zip_path),
+        "manifest_path": str(manifest_path),
+    }
+
+
+def export_all_entries_txt(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    output_text = str((payload or {}).get("output_dir") or "").strip()
+    output_dir = Path(output_text).expanduser().resolve() if output_text else configured_export_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    export_items: list[DiaryExportItem] = []
+    entries_dir = DATA_ROOT / "entries"
+    entries_dir.mkdir(parents=True, exist_ok=True)
+    for child in entries_dir.iterdir():
+        if not child.is_dir():
+            continue
+        item = build_diary_export_item(child)
+        if item is not None:
+            export_items.append(item)
+    if not export_items:
+        raise ValueError("没有可导出的日记")
+
+    export_items.sort(
+        key=lambda item: (item.entry.date, item.entry.created_at, item.entry.updated_at),
+        reverse=True,
+    )
+    txt_path = unique_output_path(output_dir / f"{safe_export_name(f'全部日记_{len(export_items)}篇日记')}.txt")
+    lines: list[str] = []
+    for index, item in enumerate(export_items, start=1):
+        entry = item.entry
+        body = entry.body.strip()
+        lines.extend(
+            [
+                f"{index}. {entry.display_title}",
+                f"日期：{entry.date}",
+                f"字数：{len(body)}",
+                "",
+                body or "（正文为空）",
+                "",
+                "-" * 48,
+                "",
+            ]
+        )
+    txt_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return {
+        "txt_path": str(txt_path),
         "output_dir": str(output_dir),
         "count": len(export_items),
     }
@@ -1054,6 +1460,31 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/modules/entries/export-all":
             try:
                 self.send_json(export_all_entries_word_pdf(self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        if parsed.path == "/api/modules/entries/export-txt":
+            try:
+                self.send_json(export_all_entries_txt(self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        if parsed.path == "/api/export/all":
+            try:
+                self.send_json(export_all_modules(self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        if parsed.path == "/api/modules/footprints/export-word":
+            try:
+                self.send_json(export_footprints_word(self.read_json_body()))
+            except Exception as exc:  # noqa: BLE001 - app boundary
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        module_export_match = re.fullmatch(r"/api/modules/([^/]+)/export-txt", parsed.path)
+        if module_export_match:
+            try:
+                self.send_json(export_module_txt(unquote(module_export_match.group(1)), self.read_json_body()))
             except Exception as exc:  # noqa: BLE001 - app boundary
                 self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return

@@ -27,6 +27,9 @@ KNOWN_MODULES = [
     "thoughts",
     "resources",
     "observations",
+    "info_memos",
+    "notes",
+    "action_plans",
 ]
 
 MODULE_METADATA = {
@@ -40,6 +43,9 @@ MODULE_METADATA = {
     "thoughts": "thought.json",
     "resources": "resource.json",
     "observations": "observation.json",
+    "info_memos": "info_memo.json",
+    "notes": "note.json",
+    "action_plans": "action_plan.json",
 }
 
 MODULE_LABELS = {
@@ -53,6 +59,9 @@ MODULE_LABELS = {
     "thoughts": "轻思考",
     "resources": "轻资源",
     "observations": "自我观察",
+    "info_memos": "信息备忘",
+    "notes": "笔记",
+    "action_plans": "行动计划",
 }
 
 

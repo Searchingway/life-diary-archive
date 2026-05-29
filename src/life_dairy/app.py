@@ -6,6 +6,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from . import __version__
+from .action_plan_storage import ActionPlanStorage
 from .book_storage import BookStorage
 from .footprint_storage import FootprintStorage
 from .info_memo_storage import InfoMemoStorage
@@ -49,6 +50,7 @@ def main() -> int:
         ObservationStorage(data_dir),
         InfoMemoStorage(data_dir),
         NoteStorage(data_dir),
+        action_plan_storage=ActionPlanStorage(data_dir),
     )
     window.show()
     return app.exec()

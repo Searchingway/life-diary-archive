@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .ai_dialogs import AISettingsDialog
 from .backup_service import MODULE_LABELS, count_module_records, run_data_health_check
 from .ui_helpers import make_scroll_area
 
@@ -61,12 +62,15 @@ class DataManagerPage(QWidget):
         self.export_button.clicked.connect(self.export_desktop_requested.emit)
         self.open_folder_button = QPushButton("打开数据文件夹", action_group)
         self.open_folder_button.clicked.connect(self.open_data_folder)
+        self.ai_settings_button = QPushButton("AI 设置", action_group)
+        self.ai_settings_button.clicked.connect(self.open_ai_settings)
         for button in (
             self.backup_button,
             self.restore_button,
             self.import_button,
             self.export_button,
             self.open_folder_button,
+            self.ai_settings_button,
         ):
             action_layout.addWidget(button)
         action_layout.addStretch(1)
@@ -121,3 +125,7 @@ class DataManagerPage(QWidget):
     def open_data_folder(self) -> None:
         self.data_root.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.data_root.resolve())))
+
+    def open_ai_settings(self) -> None:
+        dialog = AISettingsDialog(self.data_root, self)
+        dialog.exec()

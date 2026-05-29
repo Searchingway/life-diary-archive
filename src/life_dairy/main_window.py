@@ -4,6 +4,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QTabWidget
 
 from . import __version__ as APP_VERSION
+from .action_plan_page import ActionPlanPage
+from .action_plan_storage import ActionPlanStorage
 from .backup_service import (
     create_backup,
     format_import_stats,
@@ -59,6 +61,7 @@ class DiaryMainWindow(QMainWindow):
         observation_storage: ObservationStorage | None = None,
         info_memo_storage: InfoMemoStorage | None = None,
         note_storage: NoteStorage | None = None,
+        action_plan_storage: ActionPlanStorage | None = None,
     ):
         super().__init__()
         self.diary_storage = diary_storage
@@ -73,6 +76,7 @@ class DiaryMainWindow(QMainWindow):
         self.observation_storage = observation_storage or ObservationStorage(diary_storage.root_dir)
         self.info_memo_storage = info_memo_storage or InfoMemoStorage(diary_storage.root_dir)
         self.note_storage = note_storage or NoteStorage(diary_storage.root_dir)
+        self.action_plan_storage = action_plan_storage or ActionPlanStorage(diary_storage.root_dir)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -84,6 +88,7 @@ class DiaryMainWindow(QMainWindow):
         self.diary_page = DiaryPage(self.diary_storage, self.footprint_storage, self.tabs)
         self.footprint_page = FootprintPage(self.footprint_storage, self.diary_storage, self.tabs)
         self.plan_page = PlanPage(self.plan_storage, self.tabs)
+        self.action_plan_page = ActionPlanPage(self.action_plan_storage, self.tabs)
         self.lesson_page = LessonPage(self.lesson_storage, self.diary_storage, self.tabs)
         self.self_analysis_page = SelfAnalysisPage(
             self.self_analysis_storage,
@@ -117,6 +122,7 @@ class DiaryMainWindow(QMainWindow):
         self.tabs.addTab(self.diary_page, "日记")
         self.tabs.addTab(self.footprint_page, "足迹")
         self.tabs.addTab(self.plan_page, "轻计划")
+        self.tabs.addTab(self.action_plan_page, "行动计划")
         self.tabs.addTab(self.thought_page, "轻思考")
         self.tabs.addTab(self.resource_page, "轻资源")
         self.tabs.addTab(self.note_page, "笔记")
@@ -133,6 +139,8 @@ class DiaryMainWindow(QMainWindow):
         self.diary_page.dirty_state_changed.connect(self._update_tab_titles)
         self.footprint_page.dirty_state_changed.connect(self._update_tab_titles)
         self.plan_page.dirty_state_changed.connect(self._update_tab_titles)
+        self.plan_page.action_plan_created.connect(self._open_action_plan_from_plan)
+        self.action_plan_page.dirty_state_changed.connect(self._update_tab_titles)
         self.lesson_page.dirty_state_changed.connect(self._update_tab_titles)
         self.self_analysis_page.dirty_state_changed.connect(self._update_tab_titles)
         self.work_page.dirty_state_changed.connect(self._update_tab_titles)
@@ -200,6 +208,7 @@ class DiaryMainWindow(QMainWindow):
         footprint_title = "足迹 *" if self.footprint_page.has_unsaved_changes() else "足迹"
         work_title = "作品感悟 *" if self.work_page.has_unsaved_changes() else "作品感悟"
         plan_title = "轻计划 *" if self.plan_page.has_unsaved_changes() else "轻计划"
+        action_plan_title = "行动计划 *" if self.action_plan_page.has_unsaved_changes() else "行动计划"
         lesson_title = "教训与反思 *" if self.lesson_page.has_unsaved_changes() else "教训与反思"
         self_analysis_title = "自我分析 *" if self.self_analysis_page.has_unsaved_changes() else "自我分析"
         thought_title = "轻思考 *" if self.thought_page.has_unsaved_changes() else "轻思考"
@@ -211,15 +220,16 @@ class DiaryMainWindow(QMainWindow):
         self.tabs.setTabText(1, diary_title)
         self.tabs.setTabText(2, footprint_title)
         self.tabs.setTabText(3, plan_title)
-        self.tabs.setTabText(4, thought_title)
-        self.tabs.setTabText(5, resource_title)
-        self.tabs.setTabText(6, note_title)
-        self.tabs.setTabText(7, info_memo_title)
-        self.tabs.setTabText(8, observation_title)
-        self.tabs.setTabText(9, lesson_title)
-        self.tabs.setTabText(10, self_analysis_title)
-        self.tabs.setTabText(11, work_title)
-        self.tabs.setTabText(12, "数据管理")
+        self.tabs.setTabText(4, action_plan_title)
+        self.tabs.setTabText(5, thought_title)
+        self.tabs.setTabText(6, resource_title)
+        self.tabs.setTabText(7, note_title)
+        self.tabs.setTabText(8, info_memo_title)
+        self.tabs.setTabText(9, observation_title)
+        self.tabs.setTabText(10, lesson_title)
+        self.tabs.setTabText(11, self_analysis_title)
+        self.tabs.setTabText(12, work_title)
+        self.tabs.setTabText(13, "数据管理")
 
     def _backup_data(self) -> None:
         if not self._finish_all_pending_changes():
@@ -360,6 +370,7 @@ class DiaryMainWindow(QMainWindow):
             self.diary_page,
             self.footprint_page,
             self.plan_page,
+            self.action_plan_page,
             self.lesson_page,
             self.self_analysis_page,
             self.work_page,
@@ -384,6 +395,7 @@ class DiaryMainWindow(QMainWindow):
             self.observation_storage,
             self.info_memo_storage,
             self.note_storage,
+            self.action_plan_storage,
         )
 
     def _reload_data_after_restore(self) -> None:
@@ -400,6 +412,7 @@ class DiaryMainWindow(QMainWindow):
         self.observation_storage = ObservationStorage(root_dir)
         self.info_memo_storage = InfoMemoStorage(root_dir)
         self.note_storage = NoteStorage(root_dir)
+        self.action_plan_storage = ActionPlanStorage(root_dir)
 
         self.diary_page.storage = self.diary_storage
         self.diary_page.footprint_storage = self.footprint_storage
@@ -423,6 +436,7 @@ class DiaryMainWindow(QMainWindow):
         self.observation_page.self_analysis_storage = self.self_analysis_storage
         self.info_memo_page.storage = self.info_memo_storage
         self.note_page.storage = self.note_storage
+        self.action_plan_page.storage = self.action_plan_storage
         self.data_manager_page.set_data_root(root_dir)
         self.overview_page.service = self._create_overview_service()
 
@@ -472,6 +486,14 @@ class DiaryMainWindow(QMainWindow):
             "refresh_note_list",
             "note_list",
             "new_note",
+        )
+        self._reset_page_after_restore(
+            self.action_plan_page,
+            "current_plan",
+            None,
+            "refresh_list",
+            "plan_list",
+            "new_plan",
         )
         self.overview_page.refresh_overview()
         self._update_tab_titles()
@@ -621,6 +643,13 @@ class DiaryMainWindow(QMainWindow):
             self.plan_page.open_plan_by_id(plan_id)
         self.tabs.setCurrentWidget(self.plan_page)
 
+    def _open_action_plan_from_plan(self, plan_id: str) -> None:
+        if not plan_id:
+            return
+        if hasattr(self.action_plan_page, "open_plan_by_id"):
+            self.action_plan_page.open_plan_by_id(plan_id)
+        self.tabs.setCurrentWidget(self.action_plan_page)
+
     def _open_timeline_record(self, source_module: str, record_id: str) -> None:
         if source_module == "entries":
             self.diary_page.open_entry_by_id(record_id)
@@ -656,6 +685,9 @@ class DiaryMainWindow(QMainWindow):
         elif source_module == "notes":
             self.note_page.open_note_by_id(record_id)
             self.tabs.setCurrentWidget(self.note_page)
+        elif source_module == "action_plans":
+            self.action_plan_page.open_plan_by_id(record_id)
+            self.tabs.setCurrentWidget(self.action_plan_page)
 
     def _open_diary_from_relation(self, entry_id: str, target_date: str) -> None:
         if entry_id:

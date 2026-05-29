@@ -56,20 +56,21 @@ class DiaryMainWindowTests(unittest.TestCase):
         shutil.rmtree(self.case_dir, ignore_errors=True)
 
     def test_main_window_has_desktop_tabs(self) -> None:
-        self.assertEqual(13, self.window.tabs.count())
+        self.assertEqual(14, self.window.tabs.count())
         self.assertEqual("总览", self.window.tabs.tabText(0))
         self.assertEqual("日记", self.window.tabs.tabText(1))
         self.assertEqual("足迹", self.window.tabs.tabText(2))
         self.assertEqual("轻计划", self.window.tabs.tabText(3))
-        self.assertEqual("轻思考", self.window.tabs.tabText(4))
-        self.assertEqual("轻资源", self.window.tabs.tabText(5))
-        self.assertEqual("笔记", self.window.tabs.tabText(6))
-        self.assertEqual("信息备忘", self.window.tabs.tabText(7))
-        self.assertEqual("自我观察", self.window.tabs.tabText(8))
-        self.assertEqual("教训与反思", self.window.tabs.tabText(9))
-        self.assertEqual("自我分析", self.window.tabs.tabText(10))
-        self.assertEqual("作品感悟", self.window.tabs.tabText(11))
-        self.assertEqual("数据管理", self.window.tabs.tabText(12))
+        self.assertEqual("行动计划", self.window.tabs.tabText(4))
+        self.assertEqual("轻思考", self.window.tabs.tabText(5))
+        self.assertEqual("轻资源", self.window.tabs.tabText(6))
+        self.assertEqual("笔记", self.window.tabs.tabText(7))
+        self.assertEqual("信息备忘", self.window.tabs.tabText(8))
+        self.assertEqual("自我观察", self.window.tabs.tabText(9))
+        self.assertEqual("教训与反思", self.window.tabs.tabText(10))
+        self.assertEqual("自我分析", self.window.tabs.tabText(11))
+        self.assertEqual("作品感悟", self.window.tabs.tabText(12))
+        self.assertEqual("数据管理", self.window.tabs.tabText(13))
         self.assertIsNotNone(self.window.overview_page)
         self.assertFalse(hasattr(self.window, "book_page"))
         self.assertFalse(any(type(child).__name__ == "BookPage" for child in self.window.findChildren(QWidget)))
@@ -83,6 +84,7 @@ class DiaryMainWindowTests(unittest.TestCase):
             "diary_page",
             "footprint_page",
             "plan_page",
+            "action_plan_page",
             "thought_page",
             "resource_page",
             "note_page",
