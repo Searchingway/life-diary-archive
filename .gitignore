@@ -33,6 +33,8 @@ Thumbs.db
 
 # Build
 dist/
+!diary_v2.0/Untitled/dist/
+!diary_v2.0/Untitled/dist/**
 build/
 release/
 *.egg-info/

@@ -2,7 +2,7 @@
 chcp 65001
 
 set ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
-set ANTHROPIC_AUTH_TOKEN=sk-889a0dd1327240768b6cd389ab77b447
+set ANTHROPIC_AUTH_TOKEN=sk-bc8cde6da86041999df5d0015dbc68f1
 
 set ANTHROPIC_MODEL=deepseek-v4-flash[1m]
 set ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-flash[1m]

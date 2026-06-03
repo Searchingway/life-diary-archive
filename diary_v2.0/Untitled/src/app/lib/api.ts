@@ -6,6 +6,7 @@ export type ModuleKey =
   | "thoughts"
   | "resources"
   | "info_memos"
+  | "notes"
   | "observations"
   | "lessons"
   | "self_analysis"
@@ -83,11 +84,12 @@ export interface ExportResult {
   count?: number;
   output_dir?: string;
   txt_path?: string;
+  md_path?: string;
   zip_path?: string;
   manifest_path?: string;
   module_key?: ModuleKey;
   module_label?: string;
-  files?: Array<{ module_key: ModuleKey; module_label: string; txt_path?: string; docx_path?: string; count: number }>;
+  files?: Array<{ module_key: ModuleKey; module_label: string; txt_path?: string; docx_path?: string; md_path?: string; count: number }>;
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -230,6 +232,12 @@ export function exportAllEntriesTxt(): Promise<ExportResult> {
 
 export function exportModuleTxt(moduleKey: ModuleKey): Promise<ExportResult> {
   return request<ExportResult>(`/api/modules/${moduleKey}/export-txt`, {
+    method: "POST",
+  });
+}
+
+export function exportNotesMarkdown(): Promise<ExportResult> {
+  return request<ExportResult>("/api/modules/notes/export-md", {
     method: "POST",
   });
 }

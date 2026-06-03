@@ -7,6 +7,7 @@ import {
   Lightbulb,
   Target,
   Brain,
+  ClipboardList,
   Scale,
   FileText,
   Eye,
@@ -62,6 +63,7 @@ const navGroups: NavGroup[] = [
   {
     title: "信息与作品",
     items: [
+      { label: "接单备忘", path: "/order-memo", icon: ClipboardList },
       { label: "信息备忘", path: "/info-memo", icon: FileText },
       { label: "作品感悟", path: "/works-reflection", icon: Film },
     ],

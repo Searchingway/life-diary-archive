@@ -62,7 +62,7 @@ export function Dashboard() {
                 <BookOpen className="size-5" />
                 <span className="text-xs">写日记</span>
               </Button>
-              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2" onClick={() => navigate("/info-memo?new=order")}>
+              <Button variant="outline" className="flex flex-col h-auto py-4 gap-2" onClick={() => navigate("/info-memo?new=1")}>
                 <FileText className="size-5" />
                 <span className="text-xs">新信息备忘</span>
               </Button>
