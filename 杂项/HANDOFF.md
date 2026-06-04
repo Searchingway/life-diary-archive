@@ -145,3 +145,67 @@ Desktop 3.3：AI 辅助计划版
 - 版本号 3.2.0 → 3.3.0
 - 新增 16 个测试，全部通过
 ```
+
+---
+
+## Round 2 — 生命周期文档 + 架构规格体系
+
+### 修改文件
+| 文件 | 说明 |
+|------|------|
+| `docs/lifecycle/COMMON_LIFECYCLE.md` | 7 个通用生命周期（Page Loading / Record Selection / Draft Editing / Auto Save / Delete / Attachment Image / AI Preview / Export） |
+| `docs/lifecycle/PAGE_LIFECYCLES.md` | 15 个页面的生命周期模型 |
+| `openspec/specs/desktop-legacy/spec.md` | 旧版架构事实 |
+| `openspec/specs/desktop-next/spec.md` | 新版目标架构 |
+| `openspec/specs/action-plan/spec.md` | ActionPlan 系统规格（三视图数据模型 + Requirement + Scenario） |
+| `openspec/specs/ai-preview/spec.md` | AI 预览确认弹窗规格 |
+| `openspec/specs/data-contract/spec.md` | 前后端 API 数据契约 |
+| `openspec/changes/action-plan-v2/` | ActionPlan V2 完整规格包（proposal/design/lifecycle/state-model/tasks/specs） |
+| `openspec/changes/migrate-to-desktop-next/` | 架构迁移变更包 |
+| `CLAUDE.md` | 新增 Lifecycle Models 规则 + 优先级表 |
+| `杂项/HANDOFF.md` | 本文件（补充 Round 2） |
+
+### 测试结果
+- pytest: 未新增测试（纯文档变更）
+- 无风险
+
+### 是否建议 commit
+**是。** 纯规格文档，不修改代码/数据。
+
+---
+
+## Round 3 — ActionPlan V2 第一阶段：执行工作台骨架
+
+### 新增文件
+| 文件 | 说明 |
+|------|------|
+| `diary_v2.0/Untitled/src/app/types/actionPlan.ts` | ActionPlanTaskV2 类型定义 + `toActionPlanTaskV2()` 旧数据兼容转换 + 工具函数 |
+
+### 修改文件
+| 文件 | 说明 |
+|------|------|
+| `diary_v2.0/Untitled/src/app/pages/ActionPlan.tsx` | CRUD 表单 → 执行工作台骨架（sidebar + header + three-view tabs） |
+
+### ActionPlan 本轮改动
+
+- **Before**：内联编辑表单（标题 inline / 任务 inline / 无视图切换）
+- **After**：左侧计划列表 + 右侧头部 + 时间表/甘特图/任务链三视图切换
+- **Today View**：按 scheduledDate 分组，标注"今天"/"逾期"，可勾选完成
+- **Gantt View**：静态日期横轴 + 任务条（startDate/endDate 决定位置和宽度），progress 填充，estimatedMinutes 仅显示
+- **Chain View**：SVG 黑底画布 + 圆形节点 + dependsOn 虚线连接
+- **旧数据兼容**：`toActionPlanTaskV2()` 自动将旧 `date` 转换为 scheduledDate/startDate/endDate
+- **状态管理**：useReducer（state + event → newState → view）
+
+### 测试结果
+- pytest: 111/116 passed, 5 failed（均为已有失败）
+- npm run build: ✓ built in 2.44s
+
+### 风险
+| 风险 | 等级 | 说明 |
+|------|------|------|
+| Gantt/Chain 无拖拽 | 低 | 仅静态骨架，拖拽后续实现 |
+| 编辑弹窗未实现 | 低 | 标题 onBlur 保存，任务双击后续实现 |
+| AI 拆解入口未实现 | 低 | 按钮位置已保留 |
+
+### 是否建议 commit
+**建议提交。** 不改 data/Diary、不改旧版 PySide6、构建通过、测试无新增失败。
