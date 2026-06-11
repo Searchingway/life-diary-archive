@@ -280,6 +280,7 @@ export function Diary() {
             </div>
             <div className="flex-1 overflow-y-auto p-6">
               <Textarea
+                autoParagraphIndent
                 placeholder="开始写日记..."
                 className="min-h-[420px] border-0 resize-none text-base leading-relaxed focus-visible:ring-0"
                 value={selected.body || ""}

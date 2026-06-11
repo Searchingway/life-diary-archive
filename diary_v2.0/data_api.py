@@ -20,6 +20,7 @@ _src = str((Path(__file__).resolve().parent.parent / "src").resolve())
 if _src not in sys.path:
     sys.path.insert(0, _src)
 
+from life_dairy.exporters import DiaryExportItem
 from life_dairy.models import DiaryEntry, DiaryImage
 
 

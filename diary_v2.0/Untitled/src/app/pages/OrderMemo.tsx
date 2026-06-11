@@ -1,10 +1,30 @@
 import { useEffect, useState } from "react";
 import { Download, FileText, Plus, Search } from "lucide-react";
+import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { RecordItem, exportModuleTxt, listRecords, saveRecord } from "../lib/api";
+
+const orderStatusOptions = ["在报价", "已接单", "已完成", "已验收", "已结款", "已放弃"] as const;
+
+const orderStatusPriority: Record<string, number> = {
+  已接单: 0,
+  进行中: 0,
+  已验收: 1,
+  在报价: 2,
+  已完成: 3,
+  已结款: 4,
+  已放弃: 5,
+};
 
 const orderTemplate = {
   customer: "",
@@ -28,9 +48,34 @@ function draftMemo(): RecordItem {
     date: new Date().toISOString().slice(0, 10),
     updated_at: "",
     type: "接单记录",
-    status: "进行中",
-    extra: { info_type: "接单记录", status: "进行中", type_fields: orderTemplate },
+    status: "在报价",
+    extra: { info_type: "接单记录", status: "在报价", type_fields: orderTemplate },
   };
+}
+
+function getOrderStatus(record: RecordItem | null | undefined) {
+  const raw = String(record?.status || record?.extra?.status || "");
+  if (raw === "进行中") return "已接单";
+  return raw || "在报价";
+}
+
+function getOrderDate(record: RecordItem) {
+  const fields = (record.extra?.type_fields as Record<string, unknown>) ?? {};
+  return String(fields.order_date || record.date || record.updated_at || "");
+}
+
+function getOrderTime(record: RecordItem) {
+  const time = Date.parse(getOrderDate(record));
+  return Number.isFinite(time) ? time : 0;
+}
+
+function sortOrderMemos(records: RecordItem[]) {
+  return [...records].sort((a, b) => {
+    const priorityA = orderStatusPriority[getOrderStatus(a)] ?? 9;
+    const priorityB = orderStatusPriority[getOrderStatus(b)] ?? 9;
+    if (priorityA !== priorityB) return priorityA - priorityB;
+    return getOrderTime(b) - getOrderTime(a);
+  });
 }
 
 export function OrderMemo() {
@@ -41,8 +86,9 @@ export function OrderMemo() {
 
   async function load(keyword = query) {
     const data = await listRecords("info_memos", keyword);
-    setMemos(data);
-    setSelected((current) => (current?.id ? data.find((item) => item.id === current.id) ?? data[0] ?? null : data[0] ?? null));
+    const sorted = sortOrderMemos(data);
+    setMemos(sorted);
+    setSelected((current) => (current?.id ? sorted.find((item) => item.id === current.id) ?? sorted[0] ?? null : sorted[0] ?? null));
   }
 
   useEffect(() => {
@@ -50,7 +96,7 @@ export function OrderMemo() {
     if (params.get("new")) {
       listRecords("info_memos")
         .then((data) => {
-          setMemos(data);
+          setMemos(sortOrderMemos(data));
           setSelected(draftMemo());
           setMessage("已创建接单备忘草稿");
         })
@@ -67,11 +113,18 @@ export function OrderMemo() {
     setSelected({ ...selected, extra: { ...(selected.extra ?? {}), type_fields: { ...fields, [key]: value } } });
   }
 
+  function patchStatus(status: string) {
+    if (!selected) return;
+    setSelected({ ...selected, status, extra: { ...(selected.extra ?? {}), status } });
+  }
+
   async function saveSelected() {
     if (!selected) return;
-    const saved = await saveRecord("info_memos", selected);
+    const status = getOrderStatus(selected);
+    const payload = { ...selected, status, extra: { ...(selected.extra ?? {}), status } };
+    const saved = await saveRecord("info_memos", payload);
     setSelected(saved);
-    setMemos((items) => (items.some((item) => item.id === saved.id) ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items]));
+    setMemos((items) => sortOrderMemos(items.some((item) => item.id === saved.id) ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items]));
     setMessage("接单备忘已保存");
   }
 
@@ -109,35 +162,66 @@ export function OrderMemo() {
           <p className="text-xs text-muted-foreground">{message}</p>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
-          {memos.map((memo) => (
-            <button
-              key={memo.id}
-              onClick={() => setSelected(memo)}
-              className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
-                selected?.id === memo.id ? "bg-primary text-primary-foreground" : "hover:bg-accent"
-              }`}
-            >
-              <div className="flex items-start gap-2">
-                <FileText className="size-4 mt-1 shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-medium truncate">{memo.title || "未命名接单"}</p>
-                  <p className="text-xs opacity-80 mt-1">{memo.type || memo.subtitle}</p>
+          {memos.map((memo) => {
+            const status = getOrderStatus(memo);
+            const orderDate = getOrderDate(memo);
+            const active = selected?.id === memo.id;
+            return (
+              <button
+                key={memo.id}
+                onClick={() => setSelected(memo)}
+                className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
+                  active ? "bg-primary text-primary-foreground" : "hover:bg-accent"
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <FileText className="size-4 mt-1 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate">{memo.title || "未命名接单"}</p>
+                    <p className="text-xs opacity-80 mt-1">{memo.type || memo.subtitle}</p>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <Badge
+                        variant={active ? "secondary" : "outline"}
+                        className={active ? "bg-primary-foreground/15 text-primary-foreground border-primary-foreground/25" : ""}
+                      >
+                        {status}
+                      </Badge>
+                      <span className="text-[11px] opacity-70 truncate">{orderDate}</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            );
+          })}
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-8">
         {selected ? (
           <div className="max-w-4xl space-y-6">
             <div className="flex items-start justify-between gap-4">
-              <Input
-                className="text-3xl font-semibold border-0 px-0 focus-visible:ring-0"
-                value={selected.title}
-                placeholder="项目 / 订单名称"
-                onChange={(event) => setSelected({ ...selected, title: event.target.value })}
-              />
+              <div className="flex-1 space-y-3">
+                <Input
+                  className="text-3xl font-semibold border-0 px-0 focus-visible:ring-0"
+                  value={selected.title}
+                  placeholder="项目 / 订单名称"
+                  onChange={(event) => setSelected({ ...selected, title: event.target.value })}
+                />
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-muted-foreground">当前状态</span>
+                  <Select value={getOrderStatus(selected)} onValueChange={patchStatus}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="选择状态" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {orderStatusOptions.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {status}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={exportMemos}>
                   <Download className="size-4" />
@@ -177,6 +261,7 @@ export function OrderMemo() {
               </CardHeader>
               <CardContent>
                 <Textarea
+                  autoParagraphIndent
                   className="min-h-[120px]"
                   value={String(fields.deliverables ?? "")}
                   onChange={(event) => patchField("deliverables", event.target.value)}
@@ -191,6 +276,7 @@ export function OrderMemo() {
               </CardHeader>
               <CardContent>
                 <Textarea
+                  autoParagraphIndent
                   className="min-h-[180px]"
                   value={selected.body || String(selected.extra?.note || "")}
                   onChange={(event) => setSelected({ ...selected, body: event.target.value, extra: { ...(selected.extra ?? {}), note: event.target.value } })}

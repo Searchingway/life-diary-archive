@@ -352,6 +352,7 @@ export function RecordModulePage({
                 <label className="space-y-2 block">
                   <span className="text-sm text-muted-foreground">{bodyLabel}</span>
                   <Textarea
+                    autoParagraphIndent
                     value={selected.body || ""}
                     onChange={(event) => patchSelected({ body: event.target.value })}
                     readOnly={readOnly}
@@ -564,6 +565,7 @@ function ResourceCostEditor({
               </CardHeader>
               <CardContent>
                 <Textarea
+                  autoParagraphIndent
                   value={String(item?.value || item?.description || "")}
                   onChange={(event) => updateCost(index, event.target.value)}
                   readOnly={readOnly}
@@ -580,6 +582,7 @@ function ResourceCostEditor({
           <label className="space-y-2 block">
             <span className="font-medium">综合判断</span>
             <Textarea
+              autoParagraphIndent
               value={String(extra.overall_judgement || "")}
               readOnly={readOnly}
               onChange={(event) => patchExtra({ overall_judgement: event.target.value })}

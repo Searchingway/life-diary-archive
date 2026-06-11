@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import zipfile
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+_src = str((Path(__file__).resolve().parent.parent / "src").resolve())
+if _src not in sys.path:
+    sys.path.insert(0, _src)
 
 from docx import Document
 from docx.enum.text import WD_BREAK

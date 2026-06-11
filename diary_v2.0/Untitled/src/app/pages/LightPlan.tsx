@@ -200,6 +200,7 @@ export function LightPlan() {
                 <label className="space-y-2 block">
                   <span className="font-medium">计划内容</span>
                   <Textarea
+                    autoParagraphIndent
                     className="min-h-[260px] text-base leading-relaxed"
                     value={selected.body || ""}
                     onChange={(event) => setSelected({ ...selected, body: event.target.value })}

@@ -183,6 +183,7 @@ export function Footprints() {
               </CardHeader>
               <CardContent>
                 <Textarea
+                  autoParagraphIndent
                   className="min-h-[110px]"
                   placeholder="地点描述"
                   value={selected.body || ""}

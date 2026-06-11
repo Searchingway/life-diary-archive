@@ -135,6 +135,7 @@ export function WorksReflection() {
               <CardContent className="pt-6">
                 <h3 className="text-lg font-medium mb-4">我的感悟</h3>
                 <Textarea
+                  autoParagraphIndent
                   className="min-h-[360px] text-base leading-relaxed"
                   value={selected.body || ""}
                   onChange={(event) => setSelected({ ...selected, body: event.target.value })}
