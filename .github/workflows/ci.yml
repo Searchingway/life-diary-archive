@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run Python tests
+        run: python -B -m unittest discover -s tests -v
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: diary_v2.0/Untitled
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: diary_v2.0/Untitled/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+  repository-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Reject forbidden tracked files
+        shell: bash
+        run: |
+          set -euo pipefail
+          tracked="$(git ls-files)"
+          for pattern in \
+            '^data/' \
+            '^exports/' \
+            '^diary_v2\.0/data/' \
+            '^diary_v2\.0/exports/' \
+            '^diary_v2\.0/Untitled/dist/' \
+            '(^|/)node_modules/' \
+            '(^|/)\.venv/' \
+            '\.log$' \
+            '(^|/)\.tmp_testdata/'
+          do
+            if printf '%s\n' "$tracked" | grep -E "$pattern"; then
+              echo "Forbidden tracked files matched pattern: $pattern"
+              exit 1
+            fi
+          done
