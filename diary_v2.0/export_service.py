@@ -54,7 +54,7 @@ def append_footprint_record_to_docx(document: Any, record: dict[str, Any], inclu
         document.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
     place_id = str(record.get("id") or "")
     title = str(record.get("title") or "未命名足迹")
-    heading = document.add_heading(title, level=0)
+    heading = document.add_heading(title, level=1)
     set_docx_runs_font(heading, size=18, bold=True)
     body = str(record.get("body") or "").strip()
     visits = record.get("extra", {}).get("visits", []) if isinstance(record.get("extra"), dict) else []
@@ -73,7 +73,7 @@ def append_footprint_record_to_docx(document: Any, record: dict[str, Any], inclu
             continue
         visit_id = str(visit.get("id") or "")
         visit_date = str(visit.get("date") or visit.get("visit_date") or "未设置日期")
-        date_heading = document.add_heading(visit_date, level=1)
+        date_heading = document.add_heading(visit_date, level=2)
         set_docx_runs_font(date_heading, size=14, bold=True)
         thought = str(visit.get("thought") or visit.get("reflection") or "").strip()
         if thought:
