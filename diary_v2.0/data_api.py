@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import os
 import re
@@ -32,6 +33,9 @@ LEGACY_DATA_ROOT = (REPO_ROOT / "data" / "Diary").resolve()
 DATA_ROOT = Path(os.environ.get("LIFE_DIARY_DATA_ROOT", BASE_DIR / "data" / "Diary")).resolve()
 MIGRATION_MARKER = DATA_ROOT / ".life_diary_2_migration.json"
 SETTINGS_PATH = DATA_ROOT / "config" / "app_settings.json"
+SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_BASE64_CHARS = int(MAX_IMAGE_BYTES * 1.4) + 1024
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,68 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="microseconds")
 
 
+def ensure_child_path(base: Path, *parts: str) -> Path:
+    resolved_base = base.resolve()
+    target = resolved_base.joinpath(*parts).resolve()
+    if not target.is_relative_to(resolved_base):
+        raise ValueError("invalid path")
+    return target
+
+
+def validate_safe_id(value: str, field_name: str = "id") -> str:
+    text = str(value or "").strip()
+    if not SAFE_ID_RE.fullmatch(text):
+        raise ValueError(f"invalid {field_name}")
+    return text
+
+
+def safe_file_name(value: str, fallback: str = "image.png") -> str:
+    raw = str(value or fallback).strip().replace("\\", "/")
+    name = raw.rsplit("/", 1)[-1] or fallback
+    if not name or name in {".", ".."}:
+        name = fallback
+    if "/" in name or "\\" in name or ":" in name or ".." in name:
+        raise ValueError("invalid file name")
+    return name
+
+
+def validate_safe_file_name(value: str, fallback: str = "image.png") -> str:
+    raw = str(value or fallback).strip()
+    name = safe_file_name(raw, fallback)
+    if raw.replace("\\", "/") != name:
+        raise ValueError("invalid file name")
+    return name
+
+
+def atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    try:
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.replace(path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def decode_image_data(raw_value: Any) -> bytes:
+    raw_data = str(raw_value or "")
+    if "," in raw_data and raw_data.startswith("data:"):
+        raw_data = raw_data.split(",", 1)[1]
+    if len(raw_data) > MAX_IMAGE_BASE64_CHARS:
+        raise ValueError("图片过大，单张不能超过 20MB")
+    try:
+        content = base64.b64decode(raw_data, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("图片数据无效，无法解码") from exc
+    if len(content) > MAX_IMAGE_BYTES:
+        raise ValueError("图片过大，单张不能超过 20MB")
+    return content
+
+
 def migrate_legacy_data_if_needed() -> bool:
     if os.environ.get("LIFE_DIARY_SKIP_MIGRATION") == "1":
         DATA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -80,11 +146,9 @@ def migrate_legacy_data_if_needed() -> bool:
         return False
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     if not LEGACY_DATA_ROOT.exists():
-        MIGRATION_MARKER.write_text(
-            json.dumps(
-                {"migrated": False, "reason": "legacy data root not found", "legacy_data_root": str(LEGACY_DATA_ROOT), "created_at": now_iso()},
-                ensure_ascii=False, indent=2,
-            ), encoding="utf-8",
+        atomic_write_json(
+            MIGRATION_MARKER,
+            {"migrated": False, "reason": "legacy data root not found", "legacy_data_root": str(LEGACY_DATA_ROOT), "created_at": now_iso()},
         )
         return False
     for child in LEGACY_DATA_ROOT.iterdir():
@@ -93,11 +157,9 @@ def migrate_legacy_data_if_needed() -> bool:
             shutil.copytree(child, target, dirs_exist_ok=True)
         elif child.is_file():
             shutil.copy2(child, target)
-    MIGRATION_MARKER.write_text(
-        json.dumps(
-            {"migrated": True, "legacy_data_root": str(LEGACY_DATA_ROOT), "data_root": str(DATA_ROOT), "created_at": now_iso()},
-            ensure_ascii=False, indent=2,
-        ), encoding="utf-8",
+    atomic_write_json(
+        MIGRATION_MARKER,
+        {"migrated": True, "legacy_data_root": str(LEGACY_DATA_ROOT), "data_root": str(DATA_ROOT), "created_at": now_iso()},
     )
     return True
 
@@ -120,8 +182,7 @@ def read_json(path: Path) -> dict[str, Any]:
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(path, data)
 
 
 def read_settings() -> dict[str, Any]:
@@ -154,10 +215,15 @@ def read_body(record_dir: Path, data: dict[str, Any], module: ModuleConfig) -> s
     body_parts: list[str] = []
     candidates = list(module.body_files)
     body_file = data.get("body_file")
-    if isinstance(body_file, str) and body_file not in candidates:
-        candidates.insert(0, body_file)
+    if isinstance(body_file, str):
+        try:
+            safe_body_file = validate_safe_file_name(body_file)
+        except ValueError:
+            safe_body_file = ""
+        if safe_body_file and safe_body_file not in candidates:
+            candidates.insert(0, safe_body_file)
     for filename in candidates:
-        path = record_dir / filename
+        path = ensure_child_path(record_dir, validate_safe_file_name(filename))
         if path.exists() and path.is_file():
             text = path.read_text(encoding="utf-8", errors="replace").strip()
             if text:
@@ -188,7 +254,7 @@ def write_body(record_dir: Path, data: dict[str, Any], module: ModuleConfig, bod
             if filename.endswith(".md"):
                 field = "summary_file" if filename == "summary.md" else "content_file"
                 data.setdefault(field, filename)
-        (record_dir / filename).write_text(body, encoding="utf-8")
+        atomic_write_text(record_dir / filename, body)
         return
     if module.body_fields:
         data[module.body_fields[0]] = body
@@ -334,8 +400,8 @@ def build_dashboard_stats() -> dict[str, int]:
 
 
 def save_entry(payload: dict[str, Any]) -> dict[str, Any]:
-    record_id = str(payload.get("id") or uuid.uuid4().hex)
-    record_dir = DATA_ROOT / "entries" / record_id
+    record_id = validate_safe_id(str(payload.get("id") or uuid.uuid4().hex), "entry_id")
+    record_dir = ensure_child_path(DATA_ROOT / "entries", record_id)
     record_dir.mkdir(parents=True, exist_ok=True)
     metadata_path = record_dir / "entry.json"
     existing = read_json(metadata_path) if metadata_path.exists() else {}
@@ -350,8 +416,8 @@ def save_entry(payload: dict[str, Any]) -> dict[str, Any]:
         "updated_at": timestamp,
         "body_file": "content.md",
     }
-    metadata_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    (record_dir / "content.md").write_text(str(payload.get("body") or ""), encoding="utf-8")
+    write_json(metadata_path, data)
+    atomic_write_text(record_dir / "content.md", str(payload.get("body") or ""))
     return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
 
 
@@ -367,7 +433,7 @@ def image_metadata(value: Any) -> tuple[str, str] | None:
 
 
 def unique_image_name(images_dir: Path, original_name: str) -> str:
-    candidate = Path(original_name).name or "image"
+    candidate = safe_file_name(original_name)
     stem = Path(candidate).stem or "image"
     suffix = Path(candidate).suffix or ".png"
     candidate = f"{stem}{suffix}"
@@ -379,7 +445,8 @@ def unique_image_name(images_dir: Path, original_name: str) -> str:
 
 
 def add_entry_images(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    record_dir = DATA_ROOT / "entries" / entry_id
+    entry_id = validate_safe_id(entry_id, "entry_id")
+    record_dir = ensure_child_path(DATA_ROOT / "entries", entry_id)
     metadata_path = record_dir / "entry.json"
     if not metadata_path.exists():
         raise FileNotFoundError(f"entry not found: {entry_id}")
@@ -393,10 +460,7 @@ def add_entry_images(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     for item in files:
         if not isinstance(item, dict):
             continue
-        raw_data = str(item.get("data") or "")
-        if "," in raw_data and raw_data.startswith("data:"):
-            raw_data = raw_data.split(",", 1)[1]
-        content = base64.b64decode(raw_data)
+        content = decode_image_data(item.get("data"))
         file_name = unique_image_name(images_dir, str(item.get("name") or "image.png"))
         (images_dir / file_name).write_bytes(content)
         images.append({"file_name": file_name, "label": str(item.get("label") or "")})
@@ -407,17 +471,18 @@ def add_entry_images(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def entry_image_path(entry_id: str, image_name: str) -> Path:
-    candidate = (DATA_ROOT / "entries" / entry_id / "images" / image_name).resolve()
-    images_root = (DATA_ROOT / "entries" / entry_id / "images").resolve()
-    if not str(candidate).startswith(str(images_root)):
-        raise ValueError("invalid image path")
+    entry_id = validate_safe_id(entry_id, "entry_id")
+    image_name = validate_safe_file_name(image_name)
+    images_root = ensure_child_path(DATA_ROOT / "entries", entry_id, "images")
+    candidate = ensure_child_path(images_root, image_name)
     if not candidate.exists():
         raise FileNotFoundError(f"image not found: {image_name}")
     return candidate
 
 
 def update_entry_images(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    record_dir = DATA_ROOT / "entries" / entry_id
+    entry_id = validate_safe_id(entry_id, "entry_id")
+    record_dir = ensure_child_path(DATA_ROOT / "entries", entry_id)
     metadata_path = record_dir / "entry.json"
     if not metadata_path.exists():
         raise FileNotFoundError(f"entry not found: {entry_id}")
@@ -433,6 +498,7 @@ def update_entry_images(entry_id: str, payload: dict[str, Any]) -> dict[str, Any
         if not parsed:
             continue
         file_name, label = parsed
+        file_name = safe_file_name(file_name)
         image_path = entry_image_path(entry_id, file_name)
         if not image_path.exists():
             continue
@@ -473,7 +539,7 @@ def build_diary_export_item(record_dir: Path) -> DiaryExportItem | None:
     data = read_json(metadata_path)
     if data.get("deleted"):
         return None
-    body_path = record_dir / str(data.get("body_file", "content.md"))
+    body_path = ensure_child_path(record_dir, validate_safe_file_name(str(data.get("body_file", "content.md"))))
     body = body_path.read_text(encoding="utf-8", errors="replace") if body_path.exists() else ""
     images: list[DiaryImage] = []
     image_paths: list[Path] = []
@@ -667,11 +733,28 @@ def module_record_export_lines(module: ModuleConfig, record: dict[str, Any], ind
 # --- Footprint operations ---
 
 def read_footprint_visits(record_dir: Path, data: dict[str, Any]) -> list[dict[str, Any]]:
-    visits_dir = record_dir / "visits"
+    place_id = validate_safe_id(record_dir.name, "place_id")
+    visits_dir = ensure_child_path(record_dir, "visits")
     visits_dir.mkdir(parents=True, exist_ok=True)
     visit_ids = data.get("visit_ids") if isinstance(data.get("visit_ids"), list) else []
-    candidates = [visits_dir / str(visit_id) for visit_id in visit_ids]
-    candidates.extend(child for child in visits_dir.iterdir() if child.is_dir() and child not in candidates)
+    candidates: list[Path] = []
+    for visit_id in visit_ids:
+        try:
+            safe_visit_id = validate_safe_id(str(visit_id), "visit_id")
+        except ValueError:
+            continue
+        candidate = ensure_child_path(visits_dir, safe_visit_id)
+        if candidate not in candidates:
+            candidates.append(candidate)
+    for child in visits_dir.iterdir():
+        if not child.is_dir():
+            continue
+        try:
+            validate_safe_id(child.name, "visit_id")
+        except ValueError:
+            continue
+        if child not in candidates:
+            candidates.append(child)
     visits: list[dict[str, Any]] = []
     for visit_dir in candidates:
         visit_path = visit_dir / "visit.json"
@@ -683,15 +766,18 @@ def read_footprint_visits(record_dir: Path, data: dict[str, Any]) -> list[dict[s
             continue
         if visit.get("deleted"):
             continue
-        visit_id = str(visit.get("id") or visit_dir.name)
-        thought_path = visit_dir / "thought.md"
+        try:
+            visit_id = validate_safe_id(str(visit.get("id") or visit_dir.name), "visit_id")
+        except ValueError:
+            continue
+        thought_path = ensure_child_path(visit_dir, "thought.md")
         thought = thought_path.read_text(encoding="utf-8", errors="replace") if thought_path.exists() else ""
         visit["id"] = visit_id
         visit["date"] = str(visit.get("date") or visit.get("visit_date") or "")[:10]
         visit["thought"] = thought or str(visit.get("thought") or visit.get("reflection") or "")
         visit["images"] = normalize_images(
             visit.get("images", []),
-            lambda name, place_id=record_dir.name, current_visit_id=visit_id: (
+            lambda name, place_id=place_id, current_visit_id=visit_id: (
                 f"/api/modules/footprints/{place_id}/visits/{current_visit_id}/images/{name}"
             ),
         )
@@ -701,16 +787,17 @@ def read_footprint_visits(record_dir: Path, data: dict[str, Any]) -> list[dict[s
 
 
 def footprint_visit_dir(place_id: str, visit_id: str) -> Path:
-    base = (DATA_ROOT / "footprints" / place_id / "visits").resolve()
-    target = (base / visit_id).resolve()
-    if not str(target).startswith(str(base)):
-        raise ValueError("invalid visit path")
+    place_id = validate_safe_id(place_id, "place_id")
+    visit_id = validate_safe_id(visit_id, "visit_id")
+    base = ensure_child_path(DATA_ROOT / "footprints", place_id, "visits")
+    target = ensure_child_path(base, visit_id)
     target.mkdir(parents=True, exist_ok=True)
     return target
 
 
 def ensure_footprint_visit(place_id: str, visit_date: str) -> tuple[Path, dict[str, Any]]:
-    place_dir = DATA_ROOT / "footprints" / place_id
+    place_id = validate_safe_id(place_id, "place_id")
+    place_dir = ensure_child_path(DATA_ROOT / "footprints", place_id)
     metadata_path = place_dir / "footprint.json"
     if not metadata_path.exists():
         raise FileNotFoundError(f"footprint not found: {place_id}")
@@ -735,22 +822,24 @@ def ensure_footprint_visit(place_id: str, visit_date: str) -> tuple[Path, dict[s
 
 
 def save_footprint_visit(place_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    place_id = validate_safe_id(place_id, "place_id")
     visit_date = str(payload.get("date") or date.today().isoformat())[:10]
     visit_dir, visit = ensure_footprint_visit(place_id, visit_date)
     thought = str(payload.get("thought") or "")
     if thought:
-        (visit_dir / "thought.md").write_text(thought, encoding="utf-8")
+        atomic_write_text(visit_dir / "thought.md", thought)
     visit["date"] = visit_date
     visit["updated_at"] = now_iso()
     write_json(visit_dir / "visit.json", visit)
-    return record_from_directory(MODULE_BY_KEY["footprints"], DATA_ROOT / "footprints" / place_id) or {}
+    return record_from_directory(MODULE_BY_KEY["footprints"], ensure_child_path(DATA_ROOT / "footprints", place_id)) or {}
 
 
 def footprint_visit_image_path(place_id: str, visit_id: str, image_name: str) -> Path:
-    images_root = (DATA_ROOT / "footprints" / place_id / "visits" / visit_id / "images").resolve()
-    candidate = (images_root / image_name).resolve()
-    if not str(candidate).startswith(str(images_root)):
-        raise ValueError("invalid image path")
+    place_id = validate_safe_id(place_id, "place_id")
+    visit_id = validate_safe_id(visit_id, "visit_id")
+    image_name = validate_safe_file_name(image_name)
+    images_root = ensure_child_path(DATA_ROOT / "footprints", place_id, "visits", visit_id, "images")
+    candidate = ensure_child_path(images_root, image_name)
     if not candidate.exists():
         raise FileNotFoundError(f"image not found: {image_name}")
     return candidate
@@ -764,6 +853,8 @@ def footprint_image_file(place_id: str, visit_id: str, image_name: str) -> Path 
 
 
 def add_footprint_visit_images(place_id: str, visit_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    place_id = validate_safe_id(place_id, "place_id")
+    visit_id = validate_safe_id(visit_id, "visit_id")
     visit_dir = footprint_visit_dir(place_id, visit_id)
     visit_path = visit_dir / "visit.json"
     if not visit_path.exists():
@@ -778,19 +869,19 @@ def add_footprint_visit_images(place_id: str, visit_id: str, payload: dict[str, 
     for item in files:
         if not isinstance(item, dict):
             continue
-        raw_data = str(item.get("data") or "")
-        if "," in raw_data and raw_data.startswith("data:"):
-            raw_data = raw_data.split(",", 1)[1]
+        content = decode_image_data(item.get("data"))
         file_name = unique_image_name(images_dir, str(item.get("name") or "image.png"))
-        (images_dir / file_name).write_bytes(base64.b64decode(raw_data))
+        (images_dir / file_name).write_bytes(content)
         images.append({"file_name": file_name, "label": str(item.get("label") or "")})
     visit["images"] = images
     visit["updated_at"] = now_iso()
     write_json(visit_path, visit)
-    return record_from_directory(MODULE_BY_KEY["footprints"], DATA_ROOT / "footprints" / place_id) or {}
+    return record_from_directory(MODULE_BY_KEY["footprints"], ensure_child_path(DATA_ROOT / "footprints", place_id)) or {}
 
 
 def update_footprint_visit_images(place_id: str, visit_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    place_id = validate_safe_id(place_id, "place_id")
+    visit_id = validate_safe_id(visit_id, "visit_id")
     visit_dir = footprint_visit_dir(place_id, visit_id)
     visit_path = visit_dir / "visit.json"
     if not visit_path.exists():
@@ -807,6 +898,7 @@ def update_footprint_visit_images(place_id: str, visit_id: str, payload: dict[st
         if not parsed:
             continue
         file_name, label = parsed
+        file_name = validate_safe_file_name(file_name)
         path = footprint_visit_image_path(place_id, visit_id, file_name)
         if path.exists() and file_name not in keep_names:
             next_images.append({"file_name": file_name, "label": label.strip()})
@@ -818,18 +910,17 @@ def update_footprint_visit_images(place_id: str, visit_id: str, payload: dict[st
     for child in images_dir.iterdir():
         if child.is_file() and child.name not in keep_names:
             child.unlink(missing_ok=True)
-    return record_from_directory(MODULE_BY_KEY["footprints"], DATA_ROOT / "footprints" / place_id) or {}
+    return record_from_directory(MODULE_BY_KEY["footprints"], ensure_child_path(DATA_ROOT / "footprints", place_id)) or {}
 
 
 def classify_entry_images_to_footprint(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    place_id = str(payload.get("footprint_id") or "")
+    entry_id = validate_safe_id(entry_id, "entry_id")
+    place_id = validate_safe_id(str(payload.get("footprint_id") or ""), "place_id")
     visit_date = str(payload.get("date") or date.today().isoformat())[:10]
     selected_names = payload.get("images")
-    if not place_id:
-        raise ValueError("footprint_id is required")
     if not isinstance(selected_names, list) or not selected_names:
         raise ValueError("images must be a non-empty list")
-    entry_dir = DATA_ROOT / "entries" / entry_id
+    entry_dir = ensure_child_path(DATA_ROOT / "entries", entry_id)
     entry_data = read_json(entry_dir / "entry.json")
     entry_images = normalize_images(entry_data.get("images", []))
     label_by_name = {image["file_name"]: image.get("label", "") for image in entry_images}
@@ -839,7 +930,7 @@ def classify_entry_images_to_footprint(entry_id: str, payload: dict[str, Any]) -
     images = list(visit.get("images", [])) if isinstance(visit.get("images"), list) else []
     copied = 0
     for image_name in selected_names:
-        source = entry_image_path(entry_id, str(image_name))
+        source = entry_image_path(entry_id, validate_safe_file_name(str(image_name)))
         file_name = unique_image_name(images_dir, source.name)
         shutil.copy2(source, images_dir / file_name)
         images.append({"file_name": file_name, "label": label_by_name.get(source.name, "")})
@@ -847,18 +938,26 @@ def classify_entry_images_to_footprint(entry_id: str, payload: dict[str, Any]) -
     visit["images"] = images
     visit["updated_at"] = now_iso()
     write_json(visit_dir / "visit.json", visit)
-    return {"ok": True, "copied": copied, "footprint": record_from_directory(MODULE_BY_KEY["footprints"], DATA_ROOT / "footprints" / place_id)}
+    return {
+        "ok": True,
+        "copied": copied,
+        "footprint": record_from_directory(
+            MODULE_BY_KEY["footprints"],
+            ensure_child_path(DATA_ROOT / "footprints", place_id),
+        ),
+    }
 
 
 def promote_light_plan_to_action(plan_id: str) -> dict[str, Any]:
-    source_dir = DATA_ROOT / "plans" / plan_id
+    plan_id = validate_safe_id(plan_id, "plan_id")
+    source_dir = ensure_child_path(DATA_ROOT / "plans", plan_id)
     source_path = source_dir / "plan.json"
     if not source_path.exists():
         raise FileNotFoundError(f"plan not found: {plan_id}")
     source = read_json(source_path)
     body = read_body(source_dir, source, MODULE_BY_KEY["plans"])
     record_id = uuid.uuid4().hex
-    record_dir = DATA_ROOT / "action_plans" / record_id
+    record_dir = ensure_child_path(DATA_ROOT / "action_plans", record_id)
     timestamp = now_iso()
     plan_date = str(source.get("due_date") or source.get("start_date") or date.today().isoformat())[:10]
     data = {
@@ -881,8 +980,8 @@ def promote_light_plan_to_action(plan_id: str) -> dict[str, Any]:
 
 
 def save_resource(payload: dict[str, Any]) -> dict[str, Any]:
-    record_id = str(payload.get("id") or uuid.uuid4().hex)
-    record_dir = DATA_ROOT / "resources" / record_id
+    record_id = validate_safe_id(str(payload.get("id") or uuid.uuid4().hex), "record_id")
+    record_dir = ensure_child_path(DATA_ROOT / "resources", record_id)
     record_dir.mkdir(parents=True, exist_ok=True)
     metadata_path = record_dir / "resource.json"
     existing = read_json(metadata_path) if metadata_path.exists() else {}
@@ -906,7 +1005,7 @@ def save_resource(payload: dict[str, Any]) -> dict[str, Any]:
         "created_at": existing.get("created_at") or timestamp,
         "updated_at": timestamp,
     }
-    metadata_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json(metadata_path, data)
     return record_from_directory(MODULE_BY_KEY["resources"], record_dir) or {}
 
 
@@ -916,8 +1015,8 @@ def save_generic_record(module_key: str, payload: dict[str, Any]) -> dict[str, A
     if module_key == "resources":
         return save_resource(payload)
     module = MODULE_BY_KEY[module_key]
-    record_id = str(payload.get("id") or uuid.uuid4().hex)
-    record_dir = DATA_ROOT / module.directory / record_id
+    record_id = validate_safe_id(str(payload.get("id") or uuid.uuid4().hex), "record_id")
+    record_dir = ensure_child_path(DATA_ROOT / module.directory, record_id)
     record_dir.mkdir(parents=True, exist_ok=True)
     metadata_path = record_dir / module.json_file
     existing = read_json(metadata_path) if metadata_path.exists() else {}
@@ -953,7 +1052,8 @@ def save_generic_record(module_key: str, payload: dict[str, Any]) -> dict[str, A
 
 def delete_generic_record(module_key: str, record_id: str) -> None:
     module = MODULE_BY_KEY[module_key]
-    metadata_path = DATA_ROOT / module.directory / record_id / module.json_file
+    record_id = validate_safe_id(record_id, "record_id")
+    metadata_path = ensure_child_path(DATA_ROOT / module.directory, record_id, module.json_file)
     if not metadata_path.exists():
         raise FileNotFoundError(f"record not found: {record_id}")
     data = read_json(metadata_path)

@@ -22,6 +22,7 @@ from data_api import (
     classify_entry_images_to_footprint,
     configured_export_dir,
     delete_generic_record,
+    ensure_child_path,
     entry_image_path,
     footprint_visit_image_path,
     list_module_records,
@@ -45,6 +46,8 @@ from export_service import (
     export_module_txt,
     export_notes_markdown,
 )
+
+MAX_REQUEST_BYTES = 30 * 1024 * 1024
 
 
 class LifeDiaryHandler(BaseHTTPRequestHandler):
@@ -247,7 +250,14 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
 
     def read_json_body(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as exc:
+            raise ValueError("Content-Length 无效") from exc
+        if length < 0:
+            raise ValueError("Content-Length 无效")
+        if length > MAX_REQUEST_BYTES:
+            raise ValueError("请求体过大")
         raw = self.rfile.read(length).decode("utf-8")
         value = json.loads(raw) if raw else {}
         if not isinstance(value, dict):
@@ -275,10 +285,13 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         if not FRONTEND_DIST.exists():
             self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "frontend dist not found; run npm run build")
             return
-        relative = request_path.strip("/") or "index.html"
-        target = (FRONTEND_DIST / relative).resolve()
-        if not str(target).startswith(str(FRONTEND_DIST.resolve())) or not target.exists() or target.is_dir():
-            target = FRONTEND_DIST / "index.html"
+        relative = unquote(request_path).strip("/") or "index.html"
+        try:
+            target = ensure_child_path(FRONTEND_DIST, relative)
+        except ValueError:
+            target = ensure_child_path(FRONTEND_DIST, "index.html")
+        if not target.exists() or target.is_dir():
+            target = ensure_child_path(FRONTEND_DIST, "index.html")
         content = target.read_bytes()
         mime = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
         self.send_response(HTTPStatus.OK)

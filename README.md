@@ -76,6 +76,10 @@ diary_v2.0/data/Diary/
 
 这和旧版根目录下的 `data/Diary/` 是分开的。
 
+`diary_v2.0/data/Diary/` 包含真实日记、图片、计划、足迹等个人数据，不应提交到 Git。建议定期备份整个目录，而不是只备份单个记录文件。
+
+默认导出目录位于数据目录的 `exports/` 中；导出的 Word、PDF、TXT、Markdown 和压缩包同样不应提交到 Git。
+
 ## 开发说明
 
 前端页面位于：

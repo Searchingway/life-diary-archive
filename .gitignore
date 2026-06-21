@@ -7,6 +7,7 @@ __pycache__/
 .venv/
 venv/
 env/
+node_modules/
 .env
 .env.*
 pip-wheel-metadata/
@@ -20,6 +21,8 @@ htmlcov/
 # Runtime data
 data/
 exports/
+diary_v2.0/data/
+diary_v2.0/exports/
 .tmp_testdata/
 *.log
 
@@ -33,8 +36,7 @@ Thumbs.db
 
 # Build
 dist/
-!diary_v2.0/Untitled/dist/
-!diary_v2.0/Untitled/dist/**
+diary_v2.0/Untitled/dist/
 build/
 release/
 *.egg-info/

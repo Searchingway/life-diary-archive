@@ -95,7 +95,11 @@ export function Diary() {
   async function load(keyword = "") {
     const data = sortDiaryRecords(await listRecords("entries", keyword));
     setRecords(data);
-    setSelected((current) => (current?.id ? data.find((item) => item.id === current.id) ?? data[0] ?? null : data[0] ?? null));
+    setSelected((current) => {
+      const next = current?.id ? data.find((item) => item.id === current.id) ?? data[0] ?? null : data[0] ?? null;
+      selectedRef.current = next;
+      return next;
+    });
     setDirty(false);
     setMessage(`已读取 ${data.length} 篇日记`);
   }
@@ -106,7 +110,9 @@ export function Diary() {
       listRecords("entries")
         .then((data) => {
           setRecords(sortDiaryRecords(data));
-          setSelected(newDiary());
+          const draft = newDiary();
+          selectedRef.current = draft;
+          setSelected(draft);
           setDirty(false);
           setMessage("已创建日记草稿");
         })
@@ -129,7 +135,7 @@ export function Diary() {
     });
   }
 
-  async function saveCurrent(reason = "已保存", force = false) {
+  async function saveCurrent(reason = "已保存", force = false, rejectOnError = false) {
     const current = selectedRef.current;
     if (!current || (!current.id && !current.title.trim() && !current.body.trim())) return current;
     if (!force && !dirty) return current;
@@ -147,10 +153,35 @@ export function Diary() {
       return next;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
+      if (rejectOnError) throw error;
       return current;
     } finally {
       setSaving(false);
     }
+  }
+
+  async function selectRecordSafely(record: RecordItem) {
+    try {
+      await saveCurrent("已自动保存", true, true);
+    } catch {
+      return;
+    }
+    setDirty(false);
+    selectedRef.current = record;
+    setSelected(record);
+  }
+
+  async function createNewDiarySafely() {
+    try {
+      await saveCurrent("已自动保存", true, true);
+    } catch {
+      return;
+    }
+    const draft = newDiary();
+    selectedRef.current = draft;
+    setSelected(draft);
+    setDirty(false);
+    setMessage("已创建日记草稿");
   }
 
   useEffect(() => {
@@ -218,7 +249,7 @@ export function Diary() {
         <div className="p-4 border-b space-y-3">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold flex-1">日记</h2>
-            <Button size="sm" onClick={() => setSelected(newDiary())}>
+            <Button size="sm" onClick={createNewDiarySafely}>
               <Plus className="size-4" />
               新建
             </Button>
@@ -238,10 +269,7 @@ export function Diary() {
           {records.map((record) => (
             <button
               key={record.id}
-              onClick={() => {
-                setDirty(false);
-                setSelected(record);
-              }}
+              onClick={() => selectRecordSafely(record)}
               className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
                 selected?.id === record.id ? "bg-primary text-primary-foreground" : "hover:bg-accent"
               }`}
