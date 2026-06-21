@@ -684,6 +684,16 @@ class WorkPage(AutoSaveMixin, QWidget):
         self.current_work.finish_date = self._date_edit_value(self.finish_date_edit)
         self.current_work.rating = self.rating_input.text().strip()
         self.current_work.tags = tags
+        for attr in (
+            "one_sentence",
+            "liked",
+            "disliked",
+            "touched",
+            "favorite_parts",
+            "self_connection",
+            "past_connection",
+        ):
+            setattr(self.current_work, attr, "")
         for attr, edit in self.section_edits.items():
             setattr(self.current_work, attr, edit.toPlainText())
         return self.current_work

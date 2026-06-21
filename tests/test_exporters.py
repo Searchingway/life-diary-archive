@@ -4,6 +4,7 @@ import shutil
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 from zipfile import ZipFile
 
@@ -82,7 +83,12 @@ class DiaryExporterTests(unittest.TestCase):
             ),
         ]
 
-        docx_path, pdf_path = self.exporter.export_entries_word_and_pdf(export_items)
+        def create_test_pdf(_docx_path: Path, pdf_path: Path, progress=None) -> Path:
+            pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+            return pdf_path
+
+        with patch.object(self.exporter, "export_pdf_from_docx", side_effect=create_test_pdf):
+            docx_path, pdf_path = self.exporter.export_entries_word_and_pdf(export_items)
 
         self.assertTrue(docx_path.exists())
         self.assertTrue(pdf_path.exists())
@@ -90,7 +96,15 @@ class DiaryExporterTests(unittest.TestCase):
         self.assertGreater(pdf_path.stat().st_size, 0)
 
         document = Document(docx_path)
-        text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+        paragraph_text = [paragraph.text for paragraph in document.paragraphs]
+        table_text = [
+            paragraph.text
+            for table in document.tables
+            for row in table.rows
+            for cell in row.cells
+            for paragraph in cell.paragraphs
+        ]
+        text = "\n".join([*paragraph_text, *table_text])
         self.assertIn("日期：", text)
         self.assertNotIn("创建时间：", text)
         self.assertNotIn("更新时间：", text)

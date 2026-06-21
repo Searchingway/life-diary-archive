@@ -116,14 +116,14 @@ class AutoSaveTests(unittest.TestCase):
         page.type_combo.setCurrentText("电影")
         page.status_combo.setCurrentText("已完成")
         page.rating_input.setText("8.5")
-        page.section_edits["one_sentence"].setPlainText("看完后留下了很长的余味。")
+        page.section_edits["final_review"].setPlainText("看完后留下了很长的余味。")
 
         self.assertTrue(page.perform_auto_save())
         loaded = self.work_storage.load_work(page.current_work.id)
         self.assertEqual("自动保存作品感悟", loaded.title)
         self.assertEqual("电影", loaded.work_type)
         self.assertEqual("已完成", loaded.status)
-        self.assertEqual("看完后留下了很长的余味。", loaded.one_sentence)
+        self.assertEqual("看完后留下了很长的余味。", loaded.final_review)
 
         page.section_edits["final_review"].setPlainText("手动保存仍然可用。")
         self.assertTrue(page.save_work())

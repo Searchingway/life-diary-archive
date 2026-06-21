@@ -288,7 +288,7 @@ finally {
                     continue
 
                 image, image_path = row_images[cell_index]
-                caption_text = image.label.strip() or image.file_name
+                caption_text = image.label.strip() or "图片"
                 display_caption = f"图 {row_start + cell_index + 1}　{caption_text}"
 
                 image_paragraph = cell.paragraphs[0]
