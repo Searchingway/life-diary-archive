@@ -76,6 +76,11 @@ jobs:
             '^diary_v2\.0/Untitled/dist/' \
             '(^|/)node_modules/' \
             '(^|/)\.venv/' \
+            '(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache)/' \
+            '(^|/)(dist|build)/' \
+            '\.(apk|aab|exe|msi|keystore|jks|pyc)$' \
+            '(^|/)\.env(\..*)?$' \
+            '(^|/)pc_installer_work/' \
             '\.log$' \
             '(^|/)\.tmp_testdata/'
           do

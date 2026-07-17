@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 import unittest
@@ -74,26 +75,43 @@ class DiaryStorageTests(unittest.TestCase):
         self.assertEqual([first.id], [item.id for item in self.storage.list_entries("2026-04-24")])
         self.assertEqual([first.id], [item.id for item in self.storage.list_entries("江边风景")])
 
-    def test_list_entries_in_date_range_returns_oldest_first(self) -> None:
-        first = self.storage.create_empty_entry()
-        first.date = "2026-04-22"
-        first.title = "第一天"
-        self.storage.save_entry(first)
+    def test_list_entries_in_date_range_returns_newest_first_with_timestamp_ties(self) -> None:
+        oldest = self.storage.create_empty_entry()
+        oldest.date = "2026-04-22"
+        self.storage.save_entry(oldest)
 
-        second = self.storage.create_empty_entry()
-        second.date = "2026-04-24"
-        second.title = "第三天"
-        self.storage.save_entry(second)
+        earlier_same_day = self.storage.create_empty_entry()
+        earlier_same_day.date = "2026-04-24"
+        self.storage.save_entry(earlier_same_day)
 
-        third = self.storage.create_empty_entry()
-        third.date = "2026-04-23"
-        third.title = "第二天"
-        self.storage.save_entry(third)
+        later_same_day = self.storage.create_empty_entry()
+        later_same_day.date = "2026-04-24"
+        self.storage.save_entry(later_same_day)
+
+        newest_updated = self.storage.create_empty_entry()
+        newest_updated.date = "2026-04-24"
+        self.storage.save_entry(newest_updated)
+
+        timestamps = {
+            oldest.id: ("2026-04-22T08:00:00", "2026-04-22T08:00:00"),
+            earlier_same_day.id: ("2026-04-24T09:00:00", "2026-04-24T12:00:00"),
+            later_same_day.id: ("2026-04-24T10:00:00", "2026-04-24T11:00:00"),
+            newest_updated.id: ("2026-04-24T10:00:00", "2026-04-24T13:00:00"),
+        }
+        for entry_id, (created_at, updated_at) in timestamps.items():
+            metadata_path = self.storage.entry_dir(entry_id) / "entry.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["created_at"] = created_at
+            metadata["updated_at"] = updated_at
+            metadata_path.write_text(
+                json.dumps(metadata, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
         items = self.storage.list_entries_in_date_range("2026-04-22", "2026-04-24")
         self.assertEqual(
-            ["2026-04-22", "2026-04-23", "2026-04-24"],
-            [item.date for item in items],
+            [newest_updated.id, later_same_day.id, earlier_same_day.id, oldest.id],
+            [item.id for item in items],
         )
 
     def test_delete_entry_removes_directory(self) -> None:
