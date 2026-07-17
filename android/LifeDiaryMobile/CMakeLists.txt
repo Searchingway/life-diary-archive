@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LifeDiaryMobile VERSION 1.6.0 LANGUAGES CXX)
+project(LifeDiaryMobile VERSION 1.6.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,7 +55,7 @@ if(ANDROID)
         QT_ANDROID_APP_ICON "@mipmap/ic_launcher"
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
         QT_ANDROID_MIN_SDK_VERSION 27
-        QT_ANDROID_VERSION_CODE 1
+        QT_ANDROID_VERSION_CODE 3
         QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}"
     )
 endif()
