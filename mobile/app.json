@@ -17,12 +17,6 @@
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
       ],
-      "adaptiveIcon": {
-        "backgroundColor": "#F4F1EA",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
       "predictiveBackGestureEnabled": true
     },
     "web": {
