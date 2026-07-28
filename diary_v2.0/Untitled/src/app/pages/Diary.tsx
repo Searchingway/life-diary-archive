@@ -15,6 +15,7 @@ import {
   updateEntryImages,
   uploadEntryImages,
 } from "../lib/api";
+import { SaveCoordinator, shouldApplySaveResult, shouldPersistDiary } from "../lib/saveCoordinator";
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -87,6 +88,15 @@ export function Diary() {
   const [dirty, setDirty] = useState(false);
   const [classifyOpen, setClassifyOpen] = useState(false);
   const selectedRef = useRef<RecordItem | null>(null);
+  const dirtyRef = useRef(false);
+  const editRevisionRef = useRef(0);
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const switchingRef = useRef(false);
+  const draftEntryIdRef = useRef("");
+  const saveCoordinatorRef = useRef<SaveCoordinator | null>(null);
+  if (!saveCoordinatorRef.current) {
+    saveCoordinatorRef.current = new SaveCoordinator(setSaving);
+  }
   selectedRef.current = selected;
 
   const images = useMemo(() => imagesOf(selected), [selected]);
@@ -100,6 +110,7 @@ export function Diary() {
       selectedRef.current = next;
       return next;
     });
+    dirtyRef.current = false;
     setDirty(false);
     setMessage(`已读取 ${data.length} 篇日记`);
   }
@@ -113,6 +124,7 @@ export function Diary() {
           const draft = newDiary();
           selectedRef.current = draft;
           setSelected(draft);
+          dirtyRef.current = false;
           setDirty(false);
           setMessage("已创建日记草稿");
         })
@@ -123,8 +135,31 @@ export function Diary() {
   }, []);
 
   function patch(patchValue: Partial<RecordItem>) {
+    const current = selectedRef.current;
+    if (!current) return;
+    const next = { ...current, ...patchValue };
+    selectedRef.current = next;
+    editRevisionRef.current += 1;
+    dirtyRef.current = true;
+    setSelected(next);
     setDirty(true);
-    setSelected((current) => (current ? { ...current, ...patchValue } : current));
+  }
+
+  function clearAutoSaveTimer() {
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }
+
+  function copyRecord(record: RecordItem): RecordItem {
+    const images = Array.isArray(record.extra?.images)
+      ? record.extra.images.map((image) => (typeof image === "object" && image ? { ...(image as Record<string, unknown>) } : image))
+      : undefined;
+    return {
+      ...record,
+      extra: record.extra ? { ...record.extra, ...(images ? { images } : {}) } : record.extra,
+    };
   }
 
   function updateRecordList(record: RecordItem) {
@@ -137,47 +172,73 @@ export function Diary() {
 
   async function saveCurrent(reason = "已保存", force = false, rejectOnError = false) {
     const current = selectedRef.current;
-    if (!current || (!current.id && !current.title.trim() && !current.body.trim())) return current;
-    if (!force && !dirty) return current;
-    setSaving(true);
-    try {
-      const saved = await saveRecord("entries", current);
-      const next = current.id ? { ...current, updated_at: saved.updated_at } : saved;
-      selectedRef.current = next;
-      if (!current.id) {
-        setSelected(next);
+    if (!current || !shouldPersistDiary(current)) return current;
+    if (!force && !dirtyRef.current) return current;
+    const snapshot = copyRecord(current);
+    const savingRecordId = snapshot.id;
+    const savingRevision = editRevisionRef.current;
+    const task = saveCoordinatorRef.current!.enqueue(async () => {
+      const payload = snapshot.id || !draftEntryIdRef.current ? snapshot : { ...snapshot, id: draftEntryIdRef.current };
+      const saved = await saveRecord("entries", payload);
+      if (!snapshot.id) draftEntryIdRef.current = saved.id;
+      updateRecordList(saved);
+      const active = selectedRef.current;
+      if (active && shouldApplySaveResult(active.id, editRevisionRef.current, savingRecordId, savingRevision)) {
+        selectedRef.current = saved;
+        dirtyRef.current = false;
+        setSelected(saved);
+        setDirty(false);
+        setMessage(reason);
+      } else if (!snapshot.id && active && !active.id) {
+        const attached = { ...active, id: saved.id, updated_at: saved.updated_at };
+        selectedRef.current = attached;
+        setSelected(attached);
       }
-      updateRecordList(next);
-      setDirty(false);
-      setMessage(reason);
-      return next;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "保存失败");
-      if (rejectOnError) throw error;
-      return current;
-    } finally {
-      setSaving(false);
-    }
+      return saved;
+    });
+    if (rejectOnError) return task;
+    return task.catch((error) => {
+      const active = selectedRef.current;
+      if (active && shouldApplySaveResult(active.id, editRevisionRef.current, savingRecordId, savingRevision)) {
+        setMessage(error instanceof Error ? error.message : "保存失败");
+      }
+      return snapshot;
+    });
   }
 
   async function selectRecordSafely(record: RecordItem) {
+    if (switchingRef.current || selectedRef.current?.id === record.id) return;
+    switchingRef.current = true;
+    clearAutoSaveTimer();
     try {
       await saveCurrent("已自动保存", true, true);
     } catch {
       return;
+    } finally {
+      switchingRef.current = false;
     }
+    editRevisionRef.current += 1;
+    dirtyRef.current = false;
     setDirty(false);
     selectedRef.current = record;
     setSelected(record);
   }
 
   async function createNewDiarySafely() {
+    if (switchingRef.current) return;
+    switchingRef.current = true;
+    clearAutoSaveTimer();
     try {
       await saveCurrent("已自动保存", true, true);
     } catch {
       return;
+    } finally {
+      switchingRef.current = false;
     }
     const draft = newDiary();
+    draftEntryIdRef.current = "";
+    editRevisionRef.current += 1;
+    dirtyRef.current = false;
     selectedRef.current = draft;
     setSelected(draft);
     setDirty(false);
@@ -185,20 +246,36 @@ export function Diary() {
   }
 
   useEffect(() => {
+    clearAutoSaveTimer();
     if (!selected || !dirty) return;
-    const timer = window.setTimeout(() => {
-      saveCurrent();
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      void saveCurrent();
     }, 2800);
-    return () => window.clearTimeout(timer);
+    return clearAutoSaveTimer;
   }, [selected?.id, selected?.title, selected?.body, selected?.date, dirty]);
+
+  useEffect(() => {
+    const protectUnsavedChanges = (event: BeforeUnloadEvent) => {
+      if (!dirtyRef.current && !saveCoordinatorRef.current?.hasPendingSaves) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectUnsavedChanges);
+    return () => window.removeEventListener("beforeunload", protectUnsavedChanges);
+  }, []);
 
   async function uploadImages(files: File[]) {
     let target = selectedRef.current;
-    if (!target?.id) target = await saveCurrent("已创建日记", true);
+    if (!target?.id) target = await saveCurrent("已创建日记", true, true);
     if (!target?.id) return;
-    const saved = await uploadEntryImages(target.id, await filesToPayload(files));
-    setSelected(saved);
-    selectedRef.current = saved;
+    const targetId = target.id;
+    const saved = await saveCoordinatorRef.current!.enqueue(async () => uploadEntryImages(targetId, await filesToPayload(files)));
+    if (selectedRef.current?.id === targetId) {
+      const next = { ...selectedRef.current, extra: saved.extra, updated_at: saved.updated_at };
+      setSelected(next);
+      selectedRef.current = next;
+    }
     updateRecordList(saved);
     setMessage(`已插入 ${files.length} 张图片`);
   }
@@ -211,14 +288,15 @@ export function Diary() {
     setSelected(optimistic);
     updateRecordList(optimistic);
     try {
-      const saved = await updateEntryImages(
-        current.id,
-        nextImages.map((image) => ({ file_name: image.file_name, label: image.label || "" })),
-      );
-      const next = { ...optimistic, updated_at: saved.updated_at };
-      selectedRef.current = next;
-      setSelected(next);
-      updateRecordList(next);
+      const imageSnapshot = nextImages.map((image) => ({ file_name: image.file_name, label: image.label || "" }));
+      const saved = await saveCoordinatorRef.current!.enqueue(() => updateEntryImages(current.id, imageSnapshot));
+      const active = selectedRef.current;
+      if (active?.id === current.id) {
+        const next = { ...active, extra: saved.extra, updated_at: saved.updated_at };
+        selectedRef.current = next;
+        setSelected(next);
+      }
+      updateRecordList(saved);
       setMessage("图片已保存");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "图片保存失败");

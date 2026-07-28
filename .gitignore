@@ -38,6 +38,7 @@ Thumbs.db
 dist/
 diary_v2.0/Untitled/dist/
 build/
+mobile/build-output/
 release/
 *.egg-info/
 *.manifest

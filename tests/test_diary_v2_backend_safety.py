@@ -4,8 +4,10 @@ import io
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +54,113 @@ class DiaryV2BackendSafetyTests(unittest.TestCase):
         data_api.atomic_write_json(target, {"title": "测试", "count": 1})
         self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"title": "测试", "count": 1})
         self.assertFalse(target.with_name("entry.json.tmp").exists())
+
+    def test_atomic_write_text_concurrent_writes_leave_one_complete_value_and_no_temp_files(self) -> None:
+        target = self.root / "records" / "entry.json"
+        values = [f"保存内容-{index}-" + ("x" * 4096) for index in range(12)]
+        barrier = threading.Barrier(len(values))
+        errors: list[BaseException] = []
+
+        def write(value: str) -> None:
+            try:
+                barrier.wait(timeout=5)
+                data_api.atomic_write_text(target, value)
+            except BaseException as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=write, args=(value,)) for value in values]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        self.assertFalse(errors)
+        self.assertIn(target.read_text(encoding="utf-8"), values)
+        self.assertEqual([], list(target.parent.glob(".entry.json.*.tmp")))
+
+    def test_concurrent_entry_saves_leave_metadata_and_body_from_one_request(self) -> None:
+        entry_id = "concurrent_entry"
+        payloads = [
+            {"id": entry_id, "title": "请求 A", "date": "2026-07-01", "body": "A 的完整正文"},
+            {"id": entry_id, "title": "请求 B", "date": "2026-07-02", "body": "B 的完整正文"},
+        ]
+        barrier = threading.Barrier(len(payloads))
+        errors: list[BaseException] = []
+
+        def save(payload: dict[str, str]) -> None:
+            try:
+                barrier.wait(timeout=5)
+                data_api.save_entry(payload)
+            except BaseException as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=save, args=(payload,)) for payload in payloads]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        self.assertFalse(errors)
+        record_dir = data_api.DATA_ROOT / "entries" / entry_id
+        metadata = json.loads((record_dir / "entry.json").read_text(encoding="utf-8"))
+        body = (record_dir / metadata["body_file"]).read_text(encoding="utf-8")
+        self.assertIn(
+            (metadata["title"], metadata["date"], body),
+            {(payload["title"], payload["date"], payload["body"]) for payload in payloads},
+        )
+
+    def test_entry_save_uses_versioned_body_file_and_keeps_legacy_content_readable(self) -> None:
+        entry_id = "legacy_entry"
+        record_dir = data_api.DATA_ROOT / "entries" / entry_id
+        record_dir.mkdir(parents=True)
+        (record_dir / "content.md").write_text("旧正文", encoding="utf-8")
+        data_api.atomic_write_json(
+            record_dir / "entry.json",
+            {
+                "id": entry_id,
+                "title": "旧标题",
+                "date": "2026-07-01",
+                "created_at": "2026-07-01T00:00:00+08:00",
+                "updated_at": "2026-07-01T00:00:00+08:00",
+                "body_file": "content.md",
+            },
+        )
+
+        self.assertEqual("旧正文", data_api.record_from_directory(data_api.MODULE_BY_KEY["entries"], record_dir)["body"])
+
+        saved = data_api.save_entry(
+            {"id": entry_id, "title": "新标题", "date": "2026-07-02", "body": "新正文"},
+        )
+
+        metadata = json.loads((record_dir / "entry.json").read_text(encoding="utf-8"))
+        self.assertRegex(metadata["body_file"], r"^content\.[A-Za-z0-9_-]+\.md$")
+        self.assertEqual("新正文", (record_dir / metadata["body_file"]).read_text(encoding="utf-8"))
+        self.assertEqual("新正文", saved["body"])
+        self.assertFalse((record_dir / "content.md").exists())
+
+    def test_failed_entry_metadata_write_keeps_previous_metadata_and_body(self) -> None:
+        entry_id = "metadata_failure"
+        first = data_api.save_entry(
+            {"id": entry_id, "title": "已保存", "date": "2026-07-01", "body": "旧正文"},
+        )
+        record_dir = data_api.DATA_ROOT / "entries" / entry_id
+        metadata_path = record_dir / "entry.json"
+        original_write_json = data_api.write_json
+
+        def fail_metadata_write(path: Path, data: dict[str, object]) -> None:
+            if path == metadata_path:
+                raise OSError("metadata write failed")
+            original_write_json(path, data)
+
+        with patch.object(data_api, "write_json", side_effect=fail_metadata_write):
+            with self.assertRaisesRegex(OSError, "metadata write failed"):
+                data_api.save_entry(
+                    {"id": entry_id, "title": "未保存", "date": "2026-07-02", "body": "新正文"},
+                )
+
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        self.assertEqual(first["title"], metadata["title"])
+        self.assertEqual(first["body"], (record_dir / metadata["body_file"]).read_text(encoding="utf-8"))
 
     def test_validate_safe_id_accepts_safe_values(self) -> None:
         self.assertEqual(data_api.validate_safe_id("a" * 32), "a" * 32)
