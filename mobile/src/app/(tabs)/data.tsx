@@ -62,7 +62,7 @@ export default function DataScreen() {
   }
 
   return (
-    <Screen subtitle="备份包包含文字、状态、足迹访问和图片" title="数据管理">
+    <Screen subtitle="备份包包含日记、足迹、历史接单、计划和图片" title="数据管理">
       <StatusBanner error={error} text={message} />
       <Panel>
         <View style={styles.block}>
@@ -78,7 +78,7 @@ export default function DataScreen() {
       <Panel>
         <View style={styles.block}>
           <Text style={styles.title}>从 ZIP 恢复</Text>
-          <Text style={styles.body}>恢复会替换当前三类记录。操作前自动保存安全备份。</Text>
+          <Text style={styles.body}>恢复会替换当前日记、足迹、接单和计划记录。操作前自动保存安全备份。</Text>
           <SecondaryButton label="选择 ZIP 并恢复" onPress={restore} />
         </View>
       </Panel>

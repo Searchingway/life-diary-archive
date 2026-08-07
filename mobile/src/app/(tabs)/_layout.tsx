@@ -7,7 +7,7 @@ const icons: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
   index: "home-variant-outline",
   diary: "book-open-page-variant-outline",
   footprints: "map-marker-path",
-  orders: "briefcase-check-outline",
+  plans: "clipboard-check-outline",
   data: "database-cog-outline",
 };
 
@@ -33,7 +33,8 @@ export default function TabsLayout() {
       <Tabs.Screen name="index" options={{ title: "首页" }} />
       <Tabs.Screen name="diary" options={{ title: "日记" }} />
       <Tabs.Screen name="footprints" options={{ title: "足迹" }} />
-      <Tabs.Screen name="orders" options={{ title: "接单" }} />
+      <Tabs.Screen name="plans" options={{ title: "计划" }} />
+      <Tabs.Screen name="orders" options={{ href: null }} />
       <Tabs.Screen name="data" options={{ title: "数据" }} />
     </Tabs>
   );

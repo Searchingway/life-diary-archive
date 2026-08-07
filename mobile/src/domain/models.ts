@@ -1,4 +1,4 @@
-export type ModuleKey = "diary" | "footprints" | "orders";
+export type ModuleKey = "diary" | "footprints" | "orders" | "plans";
 
 export interface ImageRef {
   fileName: string;
