@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$KeystorePath,
-    [string]$OutputPath = (Join-Path $PSScriptRoot "..\build-output\life-diary-expo-2.1.0-release-signed.apk")
+    [string]$OutputPath = (Join-Path $PSScriptRoot "..\build-output\life-diary-expo-2.2.0-release-signed.apk")
 )
 
 $ErrorActionPreference = "Stop"

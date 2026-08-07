@@ -8,7 +8,7 @@ import type { RecordRepository } from "@/db/repository";
 import type { ArchiveRecord, FootprintVisit, ImageRef, ModuleKey } from "@/domain/models";
 import { ensureMediaRoot, MEDIA_ROOT } from "@/services/images";
 
-const MODULES: ModuleKey[] = ["diary", "footprints", "orders"];
+const MODULES: ModuleKey[] = ["diary", "footprints", "orders", "plans"];
 const LEGACY_ROOT = `${FileSystem.documentDirectory}Diary/`;
 
 async function allRecords(repository: RecordRepository): Promise<ArchiveRecord[]> {
@@ -50,7 +50,7 @@ export async function createBackup(repository: RecordRepository, shouldShare = t
         format: "life-diary-archive",
         version: 1,
         created_at: new Date().toISOString(),
-        app: "人生档案 Expo 2.1.0",
+        app: "人生档案 Expo 2.2.0",
         record_count: records.length,
       },
       null,
@@ -124,7 +124,7 @@ async function importZipUri(repository: RecordRepository, uri: string): Promise<
   );
   for (const entry of textEntries) textFiles[entry.name] = await entry.async("string");
   const records = await hydrateImportedImages(deserializeArchiveRecords(textFiles), zip);
-  if (!records.length) throw new Error("备份包中没有可识别的日记、足迹或接单记录。");
+  if (!records.length) throw new Error("备份包中没有可识别的日记、足迹、接单或计划记录。");
   await repository.replaceAll(records);
   return records.length;
 }

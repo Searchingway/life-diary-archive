@@ -76,6 +76,30 @@ export function serializeArchiveRecords(records: ArchiveRecord[]): ArchiveTextFi
       continue;
     }
 
+    if (record.module === "plans") {
+      files[`Diary/plans/${record.id}/plan.json`] = JSON.stringify(
+        {
+          plan_id: record.id,
+          title: record.title,
+          date: record.date,
+          status: record.status,
+          type: record.type || "计划",
+          goal: record.extra.goal || "",
+          start_date: record.extra.startDate || "",
+          deadline: record.extra.deadline || "",
+          priority: record.extra.priority || "中",
+          tasks: record.extra.tasks || [],
+          note: record.body,
+          created_at: record.createdAt,
+          updated_at: record.updatedAt,
+          deleted: Boolean(record.deleted),
+        },
+        null,
+        2,
+      );
+      continue;
+    }
+
     files[`Diary/info_memos/${record.id}/info_memo.json`] = JSON.stringify(
       {
         info_memo_id: record.id,
@@ -114,6 +138,7 @@ export function deserializeArchiveRecords(files: ArchiveTextFiles): ArchiveRecor
   const entryIds = new Set<string>();
   const footprintIds = new Set<string>();
   const orderIds = new Set<string>();
+  const planIds = new Set<string>();
 
   Object.keys(files).forEach((path) => {
     const entry = path.match(/^Diary\/entries\/([^/]+)\/entry\.json$/);
@@ -122,6 +147,8 @@ export function deserializeArchiveRecords(files: ArchiveTextFiles): ArchiveRecor
     if (footprint) footprintIds.add(footprint[1]);
     const order = path.match(/^Diary\/info_memos\/([^/]+)\/info_memo\.json$/);
     if (order) orderIds.add(order[1]);
+    const plan = path.match(/^Diary\/plans\/([^/]+)\/plan\.json$/);
+    if (plan) planIds.add(plan[1]);
   });
 
   for (const id of entryIds) {
@@ -193,9 +220,33 @@ export function deserializeArchiveRecords(files: ArchiveTextFiles): ArchiveRecor
     });
   }
 
+  for (const id of planIds) {
+    const data = parseJson(files[`Diary/plans/${id}/plan.json`]);
+    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    records.push({
+      id,
+      module: "plans",
+      title: String(data.title || ""),
+      body: String(data.note || ""),
+      date: String(data.date || data.start_date || ""),
+      status: String(data.status || "未开始"),
+      type: String(data.type || "计划"),
+      extra: {
+        goal: String(data.goal || ""),
+        startDate: String(data.start_date || data.startDate || ""),
+        deadline: String(data.deadline || ""),
+        priority: String(data.priority || "中"),
+        tasks,
+      },
+      createdAt: String(data.created_at || data.createdAt || new Date().toISOString()),
+      updatedAt: String(data.updated_at || data.updatedAt || new Date().toISOString()),
+      deleted: Boolean(data.deleted),
+    });
+  }
+
   return records;
 }
 
 export function moduleDirectory(module: ModuleKey): string {
-  return module === "diary" ? "entries" : module === "footprints" ? "footprints" : "info_memos";
+  return module === "diary" ? "entries" : module === "footprints" ? "footprints" : module === "plans" ? "plans" : "info_memos";
 }
