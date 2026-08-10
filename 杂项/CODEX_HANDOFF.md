@@ -1,5 +1,43 @@
 # CODEX_HANDOFF
 
+## Expo Android 离线启动与图标验收（2026-07-28）
+
+### 修改文件
+
+- `mobile/app.json` — 移除 Expo 默认蓝色箭头自适应图标，让 Android 启动器使用 `assets/images/icon.png` 中已复用的旧 Qt 笔记本图标。
+- `mobile/package-lock.json` — 修正 `@emnapi/wasi-threads` 的锁定版本和 `npm-package-arg` 的镜像 URL，使腾讯 npm 源可完成确定性依赖安装。
+
+### 真机验收
+
+- Android 16 / HONOR ELP-AN00（`arm64-v8a`）已实际卸载旧 Qt 签名包、安装 Expo 重构版并完成两轮冷启动。
+- 根因是 `assembleDebug` 不内置 `index.android.bundle`，离开 Metro 会报 `Unable to load script`；使用 `:app:assembleRelease` 后 JS bundle 已打入 APK，未再出现该错误或 Android/React Native 崩溃。
+- Android 启动器生成资源已直接检查为旧 Qt 笔记本图标。
+
+### 交付风险
+
+- 本机验收 APK 使用 Expo 生成的 debug signing config，仅适合本机测试；面向正式用户的包仍须在 `mobile/scripts/build-release.ps1` 中提供正式 keystore、别名及密码环境变量后签名。
+- 当前网络对 Google Maven/国内 Maven 的 TLS 握手不稳定。构建可在缓存完整时完成；`react-native-worklets:generateReleaseLintModel` 只在本机因下载 `androidx.documentfile` 失败，验收构建中已精确跳过该非运行时 lint 模型任务。
+
+## 日记自动保存并发修复（2026-07-19）
+
+### 原因与方案
+
+- 前端旧保存请求会无条件清除 dirty，且自动、手动、切换和图片写入没有统一队列。
+- `Diary.tsx` 现在用编辑版本号判断响应是否仍对应当前编辑，并通过 `SaveCoordinator` 串行化保存与图片请求；切换和新建会等待保存成功，失败时保留当前页面和 dirty。
+- 后端为每个日记 ID 设置 `RLock`，正文先写入唯一 `content.<revision>.md`，再原子更新 `entry.json` 的 `body_file`。旧 `content.md` 继续可读。
+- `atomic_write_text()` 使用同目录唯一临时文件，避免并发请求共用固定 `.tmp` 名，并对 Windows 短暂占用的 `os.replace()` 做有限重试。
+
+### 新增测试与验证
+
+- 前端：保存串行、失败恢复、旧响应失效、最新快照和空草稿规则。
+- 后端：并发原子写、同记录并发保存、旧正文兼容和 metadata 失败保护。
+- 实际执行：`npm run test -- --run`、`npm run build`、`python -B -m unittest discover -s tests -v`。
+
+### 风险与回退
+
+- 记录锁表按已访问 ID 缓存，长期运行时会缓慢增长；本轮用该有限风险换取更低的并发复杂度。
+- 回退代码时需同时回退 `data_api.py`、`Diary.tsx` 和保存协调器，避免新 metadata 指向的版本化正文失去读取路径。
+
 这份文档给下一位接手本仓库的 Codex/开发者看。当前用户最在意的是：新版 2.0 不要被旧版代码误伤，UI 风格保持现在这套 Figma 迁移后的简洁样式，功能改动要能直接落地运行。
 
 ## 当前主线

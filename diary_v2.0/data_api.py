@@ -3,11 +3,15 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+import time
 import uuid
 import zipfile
 from dataclasses import dataclass
@@ -37,6 +41,11 @@ SETTINGS_PATH = DATA_ROOT / "config" / "app_settings.json"
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_IMAGE_BASE64_CHARS = int(MAX_IMAGE_BYTES * 1.4) + 1024
+logger = logging.getLogger(__name__)
+_entry_locks_guard = threading.Lock()
+_entry_locks: dict[str, threading.RLock] = {}
+_atomic_write_locks_guard = threading.Lock()
+_atomic_write_locks: dict[Path, threading.RLock] = {}
 
 
 @dataclass(frozen=True)
@@ -108,14 +117,44 @@ def validate_safe_file_name(value: str, fallback: str = "image.png") -> str:
     return name
 
 
+def entry_lock(entry_id: str) -> threading.RLock:
+    with _entry_locks_guard:
+        return _entry_locks.setdefault(entry_id, threading.RLock())
+
+
+def atomic_write_lock(path: Path) -> threading.RLock:
+    with _atomic_write_locks_guard:
+        return _atomic_write_locks.setdefault(path.resolve(), threading.RLock())
+
+
 def atomic_write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(path.name + ".tmp")
-    try:
-        tmp_path.write_text(content, encoding="utf-8")
-        tmp_path.replace(path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    with atomic_write_lock(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temp_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            text=True,
+        )
+        tmp_path = Path(temp_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+                file.write(content)
+                file.flush()
+                os.fsync(file.fileno())
+            for attempt in range(6):
+                try:
+                    os.replace(tmp_path, path)
+                    break
+                except PermissionError:
+                    if attempt == 5:
+                        raise
+                    # Windows may keep a just-closed file handle briefly.  The
+                    # per-path lock prevents competing writers; retry only this
+                    # transient replace step rather than exposing a failed save.
+                    time.sleep(0.02 * (attempt + 1))
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
 
 def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
@@ -216,11 +255,16 @@ def read_body(record_dir: Path, data: dict[str, Any], module: ModuleConfig) -> s
     body_parts: list[str] = []
     candidates = list(module.body_files)
     body_file = data.get("body_file")
+    safe_body_file = ""
     if isinstance(body_file, str):
         try:
             safe_body_file = validate_safe_file_name(body_file)
         except ValueError:
             safe_body_file = ""
+        if module.key == "entries" and safe_body_file:
+            path = ensure_child_path(record_dir, safe_body_file)
+            if path.exists() and path.is_file():
+                return path.read_text(encoding="utf-8", errors="replace")
         if safe_body_file and safe_body_file not in candidates:
             candidates.insert(0, safe_body_file)
     for filename in candidates:
@@ -402,24 +446,38 @@ def build_dashboard_stats() -> dict[str, int]:
 
 def save_entry(payload: dict[str, Any]) -> dict[str, Any]:
     record_id = validate_safe_id(str(payload.get("id") or uuid.uuid4().hex), "entry_id")
-    record_dir = ensure_child_path(DATA_ROOT / "entries", record_id)
-    record_dir.mkdir(parents=True, exist_ok=True)
-    metadata_path = record_dir / "entry.json"
-    existing = read_json(metadata_path) if metadata_path.exists() else {}
-    timestamp = now_iso()
-    data = {
-        **existing,
-        "id": record_id,
-        "date": str(payload.get("date") or date.today().isoformat()),
-        "title": str(payload.get("title") or ""),
-        "images": existing.get("images", []),
-        "created_at": existing.get("created_at") or timestamp,
-        "updated_at": timestamp,
-        "body_file": "content.md",
-    }
-    write_json(metadata_path, data)
-    atomic_write_text(record_dir / "content.md", str(payload.get("body") or ""))
-    return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
+    with entry_lock(record_id):
+        record_dir = ensure_child_path(DATA_ROOT / "entries", record_id)
+        record_dir.mkdir(parents=True, exist_ok=True)
+        metadata_path = record_dir / "entry.json"
+        existing = read_json(metadata_path) if metadata_path.exists() else {}
+        timestamp = now_iso()
+        body_file = f"content.{uuid.uuid4().hex}.md"
+        body_path = record_dir / body_file
+        atomic_write_text(body_path, str(payload.get("body") or ""))
+        data = {
+            **existing,
+            "id": record_id,
+            "date": str(payload.get("date") or date.today().isoformat()),
+            "title": str(payload.get("title") or ""),
+            "images": existing.get("images", []),
+            "created_at": existing.get("created_at") or timestamp,
+            "updated_at": timestamp,
+            "body_file": body_file,
+        }
+        try:
+            write_json(metadata_path, data)
+        except Exception:
+            body_path.unlink(missing_ok=True)
+            raise
+        for previous_body in record_dir.glob("content*.md"):
+            if previous_body.name == body_file:
+                continue
+            try:
+                previous_body.unlink()
+            except OSError as error:
+                logger.warning("unable to remove obsolete diary body %s: %s", previous_body, error)
+        return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
 
 
 def image_metadata(value: Any) -> tuple[str, str] | None:
@@ -447,28 +505,29 @@ def unique_image_name(images_dir: Path, original_name: str) -> str:
 
 def add_entry_images(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     entry_id = validate_safe_id(entry_id, "entry_id")
-    record_dir = ensure_child_path(DATA_ROOT / "entries", entry_id)
-    metadata_path = record_dir / "entry.json"
-    if not metadata_path.exists():
-        raise FileNotFoundError(f"entry not found: {entry_id}")
-    images_dir = record_dir / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    data = read_json(metadata_path)
-    images = list(data.get("images", [])) if isinstance(data.get("images"), list) else []
-    files = payload.get("files")
-    if not isinstance(files, list):
-        raise ValueError("files must be a list")
-    for item in files:
-        if not isinstance(item, dict):
-            continue
-        content = decode_image_data(item.get("data"))
-        file_name = unique_image_name(images_dir, str(item.get("name") or "image.png"))
-        (images_dir / file_name).write_bytes(content)
-        images.append({"file_name": file_name, "label": str(item.get("label") or "")})
-    data["images"] = images
-    data["updated_at"] = now_iso()
-    write_json(metadata_path, data)
-    return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
+    with entry_lock(entry_id):
+        record_dir = ensure_child_path(DATA_ROOT / "entries", entry_id)
+        metadata_path = record_dir / "entry.json"
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"entry not found: {entry_id}")
+        images_dir = record_dir / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        data = read_json(metadata_path)
+        images = list(data.get("images", [])) if isinstance(data.get("images"), list) else []
+        files = payload.get("files")
+        if not isinstance(files, list):
+            raise ValueError("files must be a list")
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            content = decode_image_data(item.get("data"))
+            file_name = unique_image_name(images_dir, str(item.get("name") or "image.png"))
+            (images_dir / file_name).write_bytes(content)
+            images.append({"file_name": file_name, "label": str(item.get("label") or "")})
+        data["images"] = images
+        data["updated_at"] = now_iso()
+        write_json(metadata_path, data)
+        return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
 
 
 def entry_image_path(entry_id: str, image_name: str) -> Path:
@@ -483,38 +542,37 @@ def entry_image_path(entry_id: str, image_name: str) -> Path:
 
 def update_entry_images(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     entry_id = validate_safe_id(entry_id, "entry_id")
-    record_dir = ensure_child_path(DATA_ROOT / "entries", entry_id)
-    metadata_path = record_dir / "entry.json"
-    if not metadata_path.exists():
-        raise FileNotFoundError(f"entry not found: {entry_id}")
-    images_dir = record_dir / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    requested = payload.get("images")
-    if not isinstance(requested, list):
-        raise ValueError("images must be a list")
-    next_images: list[dict[str, str]] = []
-    keep_names: set[str] = set()
-    for item in requested:
-        parsed = image_metadata(item)
-        if not parsed:
-            continue
-        file_name, label = parsed
-        file_name = safe_file_name(file_name)
-        image_path = entry_image_path(entry_id, file_name)
-        if not image_path.exists():
-            continue
-        if file_name in keep_names:
-            continue
-        next_images.append({"file_name": file_name, "label": label.strip()})
-        keep_names.add(file_name)
-    data = read_json(metadata_path)
-    data["images"] = next_images
-    data["updated_at"] = now_iso()
-    write_json(metadata_path, data)
-    for child in images_dir.iterdir():
-        if child.is_file() and child.name not in keep_names:
-            child.unlink(missing_ok=True)
-    return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
+    with entry_lock(entry_id):
+        record_dir = ensure_child_path(DATA_ROOT / "entries", entry_id)
+        metadata_path = record_dir / "entry.json"
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"entry not found: {entry_id}")
+        images_dir = record_dir / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        requested = payload.get("images")
+        if not isinstance(requested, list):
+            raise ValueError("images must be a list")
+        next_images: list[dict[str, str]] = []
+        keep_names: set[str] = set()
+        for item in requested:
+            parsed = image_metadata(item)
+            if not parsed:
+                continue
+            file_name, label = parsed
+            file_name = safe_file_name(file_name)
+            image_path = entry_image_path(entry_id, file_name)
+            if not image_path.exists() or file_name in keep_names:
+                continue
+            next_images.append({"file_name": file_name, "label": label.strip()})
+            keep_names.add(file_name)
+        data = read_json(metadata_path)
+        data["images"] = next_images
+        data["updated_at"] = now_iso()
+        write_json(metadata_path, data)
+        for child in images_dir.iterdir():
+            if child.is_file() and child.name not in keep_names:
+                child.unlink(missing_ok=True)
+        return record_from_directory(MODULE_BY_KEY["entries"], record_dir) or {}
 
 
 def normalize_images(values: Any, url_builder: Any | None = None) -> list[dict[str, str]]:
