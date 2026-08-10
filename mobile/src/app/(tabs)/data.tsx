@@ -1,12 +1,13 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
 
-import { Panel, PrimaryButton, SecondaryButton } from "@/components/Controls";
+import { ButtonRow, Panel, PrimaryButton, SecondaryButton } from "@/components/Controls";
 import { Screen } from "@/components/Screen";
 import { StatusBanner } from "@/components/StatusBanner";
 import { useRepository } from "@/db/RepositoryContext";
-import { createBackup, importLegacyArchive, legacyArchiveExists, pickAndRestoreBackup } from "@/services/backup";
+import { applyDesktopCanonicalImport, createBackup, createMobileSnapshot, importLegacyArchive, legacyArchiveExists, loadDesktopCanonicalImport, pickAndRestoreBackup, pickDesktopCanonicalImport, type DesktopCanonicalImport } from "@/services/backup";
+import { consumeIncomingUri } from "@/compat/incomingIntent";
 import { colors, spacing } from "@/theme";
 
 export default function DataScreen() {
@@ -15,6 +16,9 @@ export default function DataScreen() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState(false);
+  const [canonicalImport, setCanonicalImport] = useState<DesktopCanonicalImport | null>(null);
+  const params = useLocalSearchParams<{ incoming?: string }>();
+  const lastIncoming = useRef("");
 
   useFocusEffect(
     useCallback(() => {
@@ -61,8 +65,38 @@ export default function DataScreen() {
     ]);
   }
 
+  async function selectDesktopCanonical() {
+    setBusy(true);
+    setError(false);
+    setMessage("");
+    try {
+      setCanonicalImport(await pickDesktopCanonicalImport());
+    } catch (reason) {
+      setError(true);
+      setMessage(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    const uri = typeof params.incoming === "string" ? params.incoming : "";
+    if (!uri || uri === lastIncoming.current || !consumeIncomingUri(uri)) return;
+    lastIncoming.current = uri;
+    setBusy(true);
+    setError(false);
+    setMessage("");
+    void loadDesktopCanonicalImport(uri)
+      .then(setCanonicalImport)
+      .catch((reason) => {
+        setError(true);
+        setMessage(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => setBusy(false));
+  }, [params.incoming]);
+
   return (
-    <Screen subtitle="备份包包含文字、状态、足迹访问和图片" title="数据管理">
+    <Screen subtitle="备份包包含日记、足迹、历史接单、计划和图片" title="数据管理">
       <StatusBanner error={error} text={message} />
       <Panel>
         <View style={styles.block}>
@@ -77,8 +111,30 @@ export default function DataScreen() {
       </Panel>
       <Panel>
         <View style={styles.block}>
+          <Text style={styles.title}>电脑同步</Text>
+          <Text style={styles.body}>导出到电脑会生成 Mobile Snapshot ZIP；从电脑同步只接受 Desktop Canonical ZIP，确认前不会覆盖手机数据。</Text>
+          <PrimaryButton disabled={busy} label="导出到电脑（Mobile Snapshot）" onPress={() => run(() => createMobileSnapshot(repository), () => "Mobile Snapshot ZIP 已生成")} />
+          <SecondaryButton label="从电脑同步" onPress={() => { if (!busy) void selectDesktopCanonical(); }} />
+          {canonicalImport ? <View style={styles.preview}>
+            <Text style={styles.title}>来自电脑的人生档案同步包</Text>
+            <Text style={styles.body}>生成时间：{canonicalImport.manifest.created_at}</Text>
+            <Text style={styles.body}>日记 {canonicalImport.preview.diary} · 足迹 {canonicalImport.preview.footprints} · 计划 {canonicalImport.preview.plans} · 接单备忘 {canonicalImport.preview.orders}</Text>
+            <Text style={styles.body}>电脑是正式数据源。继续后，手机共享模块将以电脑版本为准；当前手机数据会先自动备份。</Text>
+            <ButtonRow>
+              <SecondaryButton label="取消" onPress={() => { if (!busy) setCanonicalImport(null); }} />
+              <PrimaryButton disabled={busy} label="同步到手机" onPress={() => run(async () => {
+                const result = await applyDesktopCanonicalImport(repository, canonicalImport);
+                setCanonicalImport(null);
+                return result;
+              }, (value) => `同步完成：${(value as { count: number }).count} 条记录；同步前备份已创建`)} />
+            </ButtonRow>
+          </View> : null}
+        </View>
+      </Panel>
+      <Panel>
+        <View style={styles.block}>
           <Text style={styles.title}>从 ZIP 恢复</Text>
-          <Text style={styles.body}>恢复会替换当前三类记录。操作前自动保存安全备份。</Text>
+          <Text style={styles.body}>恢复会替换当前日记、足迹、接单和计划记录。操作前自动保存安全备份。</Text>
           <SecondaryButton label="选择 ZIP 并恢复" onPress={restore} />
         </View>
       </Panel>
@@ -103,4 +159,5 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 17, fontWeight: "700" },
   body: { color: colors.muted, lineHeight: 21 },
   note: { color: colors.muted, fontSize: 13, lineHeight: 20 },
+  preview: { gap: spacing.sm, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
 });

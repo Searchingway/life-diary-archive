@@ -1,4 +1,5 @@
 import type { ArchiveRecord, FootprintVisit, ImageRef, ModuleKey } from "../domain/models";
+import { migratePlanToV2 } from "./syncProtocol";
 
 export type ArchiveTextFiles = Record<string, string>;
 
@@ -20,18 +21,17 @@ export function serializeArchiveRecords(records: ArchiveRecord[]): ArchiveTextFi
     if (record.module === "diary") {
       files[`Diary/entries/${record.id}/entry.json`] = JSON.stringify(
         {
-          entry_id: record.id,
+          id: record.id,
           title: record.title,
           date: record.date,
           images: imagesFromExtra(record.extra).map((image) => ({
             file_name: image.fileName,
             label: image.label,
-            uri: image.uri,
           })),
           created_at: record.createdAt,
           updated_at: record.updatedAt,
           deleted: Boolean(record.deleted),
-          content_file: "content.md",
+          body_file: "content.md",
         },
         null,
         2,
@@ -44,12 +44,13 @@ export function serializeArchiveRecords(records: ArchiveRecord[]): ArchiveTextFi
       const visits = Array.isArray(record.extra.visits) ? (record.extra.visits as FootprintVisit[]) : [];
       files[`Diary/footprints/${record.id}/footprint.json`] = JSON.stringify(
         {
-          footprint_id: record.id,
+          id: record.id,
           place_name: record.title,
           date: record.date,
           created_at: record.createdAt,
           updated_at: record.updatedAt,
           deleted: Boolean(record.deleted),
+          images: imagesFromExtra(record.extra).map((image) => ({ file_name: image.fileName, label: image.label })),
         },
         null,
         2,
@@ -58,12 +59,11 @@ export function serializeArchiveRecords(records: ArchiveRecord[]): ArchiveTextFi
       for (const visit of visits) {
         files[`Diary/footprints/${record.id}/visits/${visit.id}/visit.json`] = JSON.stringify(
           {
-            visit_id: visit.id,
+            id: visit.id,
             date: visit.date,
             images: visit.images.map((image) => ({
               file_name: image.fileName,
               label: image.label,
-              uri: image.uri,
             })),
             created_at: visit.createdAt,
             updated_at: visit.updatedAt,
@@ -76,9 +76,30 @@ export function serializeArchiveRecords(records: ArchiveRecord[]): ArchiveTextFi
       continue;
     }
 
+    if (record.module === "plans") {
+      files[`Diary/plans/${record.id}/plan.json`] = JSON.stringify(
+        migratePlanToV2({
+          ...record.extra,
+          id: record.id,
+          title: record.title,
+          start_date: record.extra.start_date || record.extra.startDate || record.date,
+          status: record.status,
+          plan_type: record.extra.plan_type || record.type,
+          notes: record.extra.notes || record.body,
+          created_at: record.createdAt,
+          updated_at: record.updatedAt,
+          deleted: Boolean(record.deleted),
+          deleted_at: record.deletedAt || "",
+        }),
+        null,
+        2,
+      );
+      continue;
+    }
+
     files[`Diary/info_memos/${record.id}/info_memo.json`] = JSON.stringify(
       {
-        info_memo_id: record.id,
+        id: record.id,
         title: record.title,
         date: record.date,
         status: record.status,
@@ -114,6 +135,7 @@ export function deserializeArchiveRecords(files: ArchiveTextFiles): ArchiveRecor
   const entryIds = new Set<string>();
   const footprintIds = new Set<string>();
   const orderIds = new Set<string>();
+  const planIds = new Set<string>();
 
   Object.keys(files).forEach((path) => {
     const entry = path.match(/^Diary\/entries\/([^/]+)\/entry\.json$/);
@@ -122,6 +144,8 @@ export function deserializeArchiveRecords(files: ArchiveTextFiles): ArchiveRecor
     if (footprint) footprintIds.add(footprint[1]);
     const order = path.match(/^Diary\/info_memos\/([^/]+)\/info_memo\.json$/);
     if (order) orderIds.add(order[1]);
+    const plan = path.match(/^Diary\/plans\/([^/]+)\/plan\.json$/);
+    if (plan) planIds.add(plan[1]);
   });
 
   for (const id of entryIds) {
@@ -168,7 +192,7 @@ export function deserializeArchiveRecords(files: ArchiveTextFiles): ArchiveRecor
       date: String(data.date || visits[0]?.date || ""),
       status: "",
       type: "",
-      extra: { visits },
+      extra: { images: imageRefs(data.images), visits },
       createdAt: String(data.created_at || new Date().toISOString()),
       updatedAt: String(data.updated_at || new Date().toISOString()),
       deleted: Boolean(data.deleted),
@@ -193,9 +217,28 @@ export function deserializeArchiveRecords(files: ArchiveTextFiles): ArchiveRecor
     });
   }
 
+  for (const id of planIds) {
+    const data = parseJson(files[`Diary/plans/${id}/plan.json`]);
+    const plan = migratePlanToV2({ ...data, id });
+    records.push({
+      id,
+      module: "plans",
+      title: plan.title,
+      body: plan.notes,
+      date: plan.start_date,
+      status: plan.status,
+      type: plan.plan_type,
+      extra: plan,
+      createdAt: String(plan.created_at || new Date().toISOString()),
+      updatedAt: String(plan.updated_at || new Date().toISOString()),
+      deleted: Boolean(plan.deleted),
+      deletedAt: String(plan.deleted_at || "") || undefined,
+    });
+  }
+
   return records;
 }
 
 export function moduleDirectory(module: ModuleKey): string {
-  return module === "diary" ? "entries" : module === "footprints" ? "footprints" : "info_memos";
+  return module === "diary" ? "entries" : module === "footprints" ? "footprints" : module === "plans" ? "plans" : "info_memos";
 }

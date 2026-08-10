@@ -2,7 +2,7 @@
   "expo": {
     "name": "人生档案",
     "slug": "life-diary-mobile",
-    "version": "2.1.0",
+    "version": "2.3.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "lifediary",
@@ -12,12 +12,24 @@
     },
     "android": {
       "package": "com.localfirst.lifediary",
-      "versionCode": 3,
+      "versionCode": 5,
       "allowBackup": false,
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
       ],
-      "predictiveBackGestureEnabled": true
+      "predictiveBackGestureEnabled": true,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [{ "mimeType": "application/zip" }, { "mimeType": "application/x-zip-compressed" }]
+        },
+        {
+          "action": "SEND",
+          "category": ["DEFAULT"],
+          "data": [{ "mimeType": "application/zip" }, { "mimeType": "application/x-zip-compressed" }]
+        }
+      ]
     },
     "web": {
       "output": "static",
@@ -30,8 +42,8 @@
         {
           "backgroundColor": "#208AEF",
           "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
+            "image": "./assets/images/icon.png",
+            "imageWidth": 128
           }
         }
       ],

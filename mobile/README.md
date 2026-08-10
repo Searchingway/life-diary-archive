@@ -32,10 +32,10 @@ $env:LIFE_DIARY_KEY_ALIAS = "life_diary"
 .\scripts\build-release.ps1 -KeystorePath "D:\path\life_diary_release.keystore"
 ```
 
-产物写入 `mobile/build-output/人生档案-Expo-2.1.0-release-signed.apk`。签名密码和密钥均不进入 Git。
+产物写入 `mobile/build-output/LifeDiary-Mobile-2.3.0.apk`。签名密码和密钥均不进入 Git，APK 仅本地交付且保持 ignored。
 
 ## 数据兼容
 
-Android 包名保持 `com.localfirst.lifediary`，版本号为 `2.1.0 (3)`。使用旧版相同签名安装时可覆盖升级，并可在“数据管理”中导入原应用私有目录下的 `Diary` 文本和图片。
+Android 包名保持 `com.localfirst.lifediary`，版本号为 `2.3.0 (5)`。使用旧版相同签名安装时可覆盖升级。数据管理区分普通手机备份与电脑同步：Mobile Snapshot 使用 Sync Protocol V1；Desktop Canonical ZIP 仅在预览、创建同步前备份后覆盖共享模块。
 
 恢复 ZIP 会替换当前日记、足迹和接单记录，因此程序会先在缓存目录生成当前状态安全备份。卸载应用会清除应用私有目录，卸载前必须主动导出 ZIP。

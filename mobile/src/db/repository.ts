@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 
 import type { ArchiveRecord, ModuleKey, NewRecord } from "../domain/models";
+import { migratePlanToV2, SHARED_MODULES } from "../compat/syncProtocol";
 
 export interface RecordRepository {
   list(module: ModuleKey, query?: string): Promise<ArchiveRecord[]>;
@@ -9,7 +10,10 @@ export interface RecordRepository {
   softDelete(id: string): Promise<void>;
   count(module: ModuleKey): Promise<number>;
   replaceAll(records: ArchiveRecord[]): Promise<void>;
+  replaceSharedModules(records: ArchiveRecord[]): Promise<void>;
 }
+
+const sharedModules = new Set<ModuleKey>(SHARED_MODULES);
 
 function now(): string {
   return new Date().toISOString();
@@ -22,7 +26,7 @@ function makeId(): string {
 
 function normalize(record: NewRecord, existing?: ArchiveRecord | null): ArchiveRecord {
   const timestamp = now();
-  return {
+  const normalized: ArchiveRecord = {
     id: record.id || existing?.id || makeId(),
     module: record.module,
     title: record.title.trim(),
@@ -34,6 +38,29 @@ function normalize(record: NewRecord, existing?: ArchiveRecord | null): ArchiveR
     createdAt: existing?.createdAt || timestamp,
     updatedAt: timestamp,
     deleted: false,
+  };
+  if (normalized.module !== "plans") return normalized;
+  const plan = migratePlanToV2({
+    ...normalized.extra,
+    id: normalized.id,
+    title: normalized.title,
+    start_date: normalized.extra.start_date || normalized.extra.startDate || normalized.date,
+    status: normalized.status,
+    plan_type: normalized.extra.plan_type || normalized.type,
+    notes: normalized.extra.notes ?? normalized.body,
+    created_at: normalized.createdAt,
+    updated_at: normalized.updatedAt,
+    deleted: normalized.deleted,
+    deleted_at: normalized.deletedAt || "",
+  });
+  return {
+    ...normalized,
+    title: plan.title,
+    body: plan.notes,
+    date: plan.start_date,
+    status: plan.status,
+    type: plan.plan_type,
+    extra: plan,
   };
 }
 
@@ -72,6 +99,10 @@ export function createMemoryRecordRepository(): RecordRepository {
     },
     async replaceAll(nextRecords) {
       records.clear();
+      nextRecords.forEach((record) => records.set(record.id, record));
+    },
+    async replaceSharedModules(nextRecords) {
+      for (const [id, record] of records) if (sharedModules.has(record.module)) records.delete(id);
       nextRecords.forEach((record) => records.set(record.id, record));
     },
   };
@@ -175,6 +206,30 @@ export function createSqliteRecordRepository(database: SQLiteDatabase): RecordRe
     async replaceAll(records) {
       await database.withTransactionAsync(async () => {
         await database.runAsync("DELETE FROM records");
+        for (const record of records) {
+          await database.runAsync(
+            `INSERT INTO records
+              (id, module, title, body, date, status, type, extra_json, created_at, updated_at, deleted, deleted_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            record.id,
+            record.module,
+            record.title,
+            record.body,
+            record.date,
+            record.status,
+            record.type,
+            JSON.stringify(record.extra),
+            record.createdAt,
+            record.updatedAt,
+            record.deleted ? 1 : 0,
+            record.deletedAt ?? null,
+          );
+        }
+      });
+    },
+    async replaceSharedModules(records) {
+      await database.withTransactionAsync(async () => {
+        await database.runAsync("DELETE FROM records WHERE module IN (?, ?, ?, ?)", ...SHARED_MODULES);
         for (const record of records) {
           await database.runAsync(
             `INSERT INTO records

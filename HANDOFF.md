@@ -44,3 +44,28 @@
 
 ### 是否建议 commit
 是；建议 message：`fix(sync): complete desktop protocol v1 acceptance`。本轮未推送。
+
+## Mobile 2.3.0 Sync Protocol V1
+
+### 修改文件
+- `mobile/src/compat/syncProtocol.ts`, `mobile/src/services/backup.ts` — Mobile Snapshot 与 Desktop Canonical ZIP 的 V1 manifest、Plan V2 canonical migration、共享模块预览和先备份后替换导入。
+- `mobile/src/compat/incomingIntent.ts`, `mobile/src/app/+native-intent.ts`, `mobile/src/app/(tabs)/data.tsx` — Android ZIP VIEW/SEND URI 路由、去重和数据页手动导入入口。
+- `mobile/src/domain/plans.ts`, `mobile/src/app/(tabs)/plans.tsx`, `mobile/src/db/repository.ts`, `mobile/src/compat/archive.ts` — Plan V2 字段/别名兼容、canonical 写入和仅替换共享模块。
+- `mobile/app.json`, `mobile/package*.json`, `mobile/README.md`, `mobile/FAQ_APK.md`, `mobile/scripts/build-release.ps1` — 2.3.0 (5)、ZIP intent filters、交付路径及本地 APK 不入 Git 说明。
+- `mobile/src/__tests__/syncProtocol.test.ts`, `archive.test.ts`, `plans.test.ts`, `repository.test.ts` — 协议、fixture、迁移、URI、导入替换和 Today 回归覆盖。
+
+### 测试结果
+- `npm run typecheck`：通过。
+- `npm test`：5 files / 19 tests passed。
+- `npx expo export --platform android`：通过。
+- `npx expo prebuild --platform android --clean --no-install`：通过；生成的 AndroidManifest 包含 ZIP VIEW/SEND 过滤器。
+- `:app:assembleRelease`：通过（仅本次构建使用完整的本机 NDK 27.2.12479018 覆盖，以避开损坏的 27.1.12297006 安装）。
+- APK：`mobile/build-output/LifeDiary-Mobile-2.3.0.apk`，`aapt` 验证 `com.localfirst.lifediary` / `2.3.0 (5)`，v2 签名有效，SHA-256 为 `C60DD2993B3651604F2F0BA9CD093FAEF97B21E24B9771F77EF247A55CD5041A`。
+
+### 风险
+- Release APK 使用 Android Debug 签名；本机没有正式 release keystore。历史 2.2 APK 的证书未在本轮临时提取比对，因此能否与旧安装包覆盖升级须在实际设备上确认。
+- 未检测到 ADB 已连接设备，未执行安装或启动验收。
+- 产物位于 ignored 的 `mobile/build-output/`，不提交 Git。
+
+### 是否建议 commit
+是；建议 message：`feat(mobile): implement sync protocol v1 2.3`。本轮未提交或推送。
