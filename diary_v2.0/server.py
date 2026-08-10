@@ -35,6 +35,7 @@ from data_api import (
     select_and_store_export_directory,
     update_entry_images,
     update_footprint_visit_images,
+    unique_output_path,
     write_settings,
 )
 from export_service import (
@@ -46,8 +47,10 @@ from export_service import (
     export_module_txt,
     export_notes_markdown,
 )
+from sync_service import SyncService
 
 MAX_REQUEST_BYTES = 30 * 1024 * 1024
+sync_service = SyncService()
 
 
 class LifeDiaryHandler(BaseHTTPRequestHandler):
@@ -63,6 +66,13 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/settings":
             self.send_json({**read_settings(), "export_dir": str(configured_export_dir())})
+            return
+        session_match = re.fullmatch(r"/api/sync/sessions/([^/]+)", parsed.path)
+        if session_match:
+            try:
+                self.send_json(sync_service.get_session(unquote(session_match.group(1))))
+            except Exception as exc:
+                self.send_error(HTTPStatus.NOT_FOUND, str(exc))
             return
         image_match = re.fullmatch(r"/api/modules/entries/([^/]+)/images/(.+)", parsed.path)
         if image_match:
@@ -103,6 +113,51 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/actions/select-export-dir":
             try:
                 self.send_json(select_and_store_export_directory())
+            except Exception as exc:
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        if parsed.path == "/api/sync/select-mobile-zip":
+            try:
+                self.send_json({"zip_path": sync_service.select_mobile_snapshot_zip()})
+            except Exception as exc:
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        if parsed.path == "/api/sync/import-mobile":
+            try:
+                payload = self.read_json_body()
+                self.send_json(sync_service.prepare_mobile_import(str(payload.get("zip_path") or "")))
+            except Exception as exc:
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        resolve_entry_match = re.fullmatch(r"/api/sync/sessions/([^/]+)/resolve-entry", parsed.path)
+        if resolve_entry_match:
+            try:
+                payload = self.read_json_body()
+                self.send_json(sync_service.resolve_entry_conflict(unquote(resolve_entry_match.group(1)), str(payload.get("conflict_id") or ""), str(payload.get("body") or ""), payload.get("title")))
+            except Exception as exc:
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        resolve_generic_match = re.fullmatch(r"/api/sync/sessions/([^/]+)/resolve-generic", parsed.path)
+        if resolve_generic_match:
+            try:
+                payload = self.read_json_body()
+                self.send_json(sync_service.resolve_generic_conflict(unquote(resolve_generic_match.group(1)), str(payload.get("conflict_id") or ""), str(payload.get("choice") or "")))
+            except Exception as exc:
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        commit_match = re.fullmatch(r"/api/sync/sessions/([^/]+)/commit", parsed.path)
+        if commit_match:
+            try:
+                self.send_json(sync_service.commit_import(unquote(commit_match.group(1))))
+            except Exception as exc:
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        if parsed.path == "/api/sync/export-canonical":
+            try:
+                payload = self.read_json_body()
+                requested = str(payload.get("output_path") or "").strip()
+                output = Path(requested).expanduser().resolve() if requested else unique_output_path(configured_export_dir() / "LifeDiary-Desktop-Canonical.zip")
+                self.send_json({"zip_path": sync_service.create_desktop_canonical_zip(output)})
             except Exception as exc:
                 self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return

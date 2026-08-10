@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
-import { Activity, AlertTriangle, Database, Download, FileCheck, FolderOpen } from "lucide-react";
+import { Activity, AlertTriangle, Database, Download, FileCheck, FolderOpen, GitMerge, Upload } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { AppSettings, Overview, exportAllModules, getOverview, getSettings, openDataRoot, selectExportDirectory } from "../lib/api";
+import { AppSettings, Overview, SyncConflict, SyncSession, commitSyncImport, exportAllModules, exportDesktopCanonicalZip, getOverview, getSettings, getSyncSession, importMobileSnapshot, openDataRoot, resolveEntrySyncConflict, resolveGenericSyncConflict, selectExportDirectory, selectMobileSnapshotZip } from "../lib/api";
 
 export function DataManagement() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [syncSession, setSyncSession] = useState<SyncSession | null>(null);
+  const [mergeBodies, setMergeBodies] = useState<Record<string, string>>({});
+  const [syncBusy, setSyncBusy] = useState(false);
   const [message, setMessage] = useState("正在检查数据");
 
   useEffect(() => {
@@ -51,6 +54,92 @@ export function DataManagement() {
     }
   }
 
+  async function refreshSession(sessionId: string) {
+    const next = await getSyncSession(sessionId);
+    setSyncSession(next);
+    setMergeBodies((current) => {
+      const updated = { ...current };
+      next.conflicts.forEach((conflict) => {
+        if (updated[conflict.id] === undefined) updated[conflict.id] = conflict.desktop.body;
+      });
+      return updated;
+    });
+  }
+
+  async function handleMobileImport() {
+    setSyncBusy(true);
+    try {
+      const selected = await selectMobileSnapshotZip();
+      const session = await importMobileSnapshot(selected.zip_path);
+      setSyncSession(session);
+      setMergeBodies(Object.fromEntries(session.conflicts.map((conflict) => [conflict.id, conflict.desktop.body])));
+      setMessage(`手机版导入已预检：${session.summary.conflict} 个待处理冲突。安全备份：${session.safety_backup}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "手机版 ZIP 导入失败");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function resolveEntry(conflict: SyncConflict, choice?: "desktop" | "mobile") {
+    if (!syncSession) return;
+    setSyncBusy(true);
+    try {
+      const body = choice === "desktop" ? conflict.desktop.body : choice === "mobile" ? conflict.mobile.body : mergeBodies[conflict.id] ?? "";
+      await resolveEntrySyncConflict(syncSession.id, conflict.id, body);
+      await refreshSession(syncSession.id);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存冲突解决结果失败");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function resolveGeneric(conflict: SyncConflict, choice: "desktop" | "mobile") {
+    if (!syncSession) return;
+    setSyncBusy(true);
+    try {
+      await resolveGenericSyncConflict(syncSession.id, conflict.id, choice);
+      await refreshSession(syncSession.id);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存冲突解决结果失败");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function handleCommitSync() {
+    if (!syncSession) return;
+    setSyncBusy(true);
+    try {
+      await commitSyncImport(syncSession.id);
+      await refreshSession(syncSession.id);
+      setMessage("手机版导入已一次性提交到 Desktop Canonical 数据库。");
+      getOverview().then(setOverview).catch(() => undefined);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "提交导入失败");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function handleExportCanonical() {
+    setSyncBusy(true);
+    try {
+      const result = await exportDesktopCanonicalZip();
+      setMessage(`Desktop Canonical ZIP 已生成：${result.zip_path}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "生成手机同步包失败");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  function renderVersion(body: string, changedLines: number[] | undefined, changedClass: string) {
+    const changed = new Set(changedLines ?? []);
+    return <pre className="min-h-48 max-h-96 overflow-auto whitespace-pre-wrap text-sm leading-6">{(body.split("\n").length ? body.split("\n") : [""]).map((line, index) => <span key={index} className={changed.has(index) ? `${changedClass} block px-1` : "block px-1"}>{line || " "}</span>)}</pre>;
+  }
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-5xl mx-auto p-8 space-y-8">
@@ -58,6 +147,52 @@ export function DataManagement() {
           <h1 className="text-3xl font-semibold">数据管理</h1>
           <p className="text-muted-foreground mt-2">2.0 使用独立数据目录，首次启动自动从旧版迁移。</p>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <GitMerge className="size-5" />
+              手机版同步
+            </CardTitle>
+            <CardDescription>Desktop 为唯一 Canonical 主库。导入只在所有冲突解决后一次性提交。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={handleMobileImport} disabled={syncBusy}>
+                <Upload className="size-4" />
+                导入手机版 ZIP
+              </Button>
+              <Button variant="outline" onClick={handleExportCanonical} disabled={syncBusy}>
+                <Download className="size-4" />
+                生成手机同步包
+              </Button>
+            </div>
+            {syncSession && <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+                {Object.entries(syncSession.summary).map(([key, count]) => <div className="rounded bg-secondary p-3" key={key}><p className="text-muted-foreground">{key}</p><p className="text-lg font-semibold">{count}</p></div>)}
+              </div>
+              <p className="text-xs text-muted-foreground break-all">导入前安全备份：{syncSession.safety_backup}</p>
+              {syncSession.conflicts.map((conflict) => <div key={conflict.id} className="border rounded-lg p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div><p className="font-semibold">{conflict.module === "entries" ? `日记 ${conflict.desktop.id}` : `${conflict.module} ${conflict.canonical_id}`}</p><p className="text-sm text-muted-foreground">{conflict.reason}；PC ID 将保留为 {conflict.canonical_id}</p></div>
+                  <span className={conflict.resolved ? "text-green-600 text-sm" : "text-orange-600 text-sm"}>{conflict.resolved ? "已解决" : "待处理"}</span>
+                </div>
+                {conflict.module === "entries" ? <>
+                  <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                    <div className="rounded border"><p className="px-3 py-2 font-medium bg-secondary">PC 当前版本（只读）</p>{renderVersion(conflict.desktop.body, conflict.desktop_changed_lines, "bg-red-100 dark:bg-red-950")}</div>
+                    <div className="rounded border"><p className="px-3 py-2 font-medium bg-secondary">最终合并结果（可编辑）</p><textarea className="w-full min-h-48 p-3 bg-transparent text-sm leading-6" value={mergeBodies[conflict.id] ?? conflict.desktop.body} onChange={(event) => setMergeBodies((current) => ({ ...current, [conflict.id]: event.target.value }))} disabled={conflict.resolved || syncBusy} /></div>
+                    <div className="rounded border"><p className="px-3 py-2 font-medium bg-secondary">Mobile 版本（只读）</p>{renderVersion(conflict.mobile.body, conflict.mobile_changed_lines, "bg-green-100 dark:bg-green-950")}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={conflict.resolved || syncBusy} onClick={() => resolveEntry(conflict, "desktop")}>采用电脑版本</Button><Button size="sm" variant="outline" disabled={conflict.resolved || syncBusy} onClick={() => resolveEntry(conflict, "mobile")}>采用手机版本</Button><Button size="sm" disabled={conflict.resolved || syncBusy} onClick={() => resolveEntry(conflict)}>保存并解决</Button></div>
+                </> : <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3"><pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-secondary p-3 text-xs">{conflict.desktop.body}</pre><pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-secondary p-3 text-xs">{conflict.mobile.body}</pre></div>
+                  <div className="flex gap-2"><Button size="sm" variant="outline" disabled={conflict.resolved || syncBusy} onClick={() => resolveGeneric(conflict, "desktop")}>保留电脑版本</Button><Button size="sm" variant="outline" disabled={conflict.resolved || syncBusy} onClick={() => resolveGeneric(conflict, "mobile")}>采用手机版本</Button></div>
+                </>}
+              </div>)}
+              <Button disabled={syncBusy || Boolean(syncSession.committed_at) || syncSession.conflicts.some((conflict) => !conflict.resolved)} onClick={handleCommitSync}>一次性 Commit Import</Button>
+            </>}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

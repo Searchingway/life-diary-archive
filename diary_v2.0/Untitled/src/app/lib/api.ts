@@ -92,6 +92,36 @@ export interface ExportResult {
   files?: Array<{ module_key: ModuleKey; module_label: string; txt_path?: string; docx_path?: string; md_path?: string; count: number }>;
 }
 
+export interface SyncConflictVersion {
+  id: string;
+  title?: string;
+  body: string;
+  updated_at?: string;
+  images?: Array<{ file_name: string }>;
+}
+
+export interface SyncConflict {
+  id: string;
+  kind: "conflict";
+  module: "entries" | "footprints" | "plans" | "info_memos";
+  canonical_id: string;
+  desktop: SyncConflictVersion;
+  mobile: SyncConflictVersion;
+  reason: string;
+  resolved: boolean;
+  desktop_changed_lines?: number[];
+  mobile_changed_lines?: number[];
+}
+
+export interface SyncSession {
+  id: string;
+  created_at: string;
+  safety_backup: string;
+  summary: Record<"new" | "unchanged" | "stale_mobile" | "duplicate" | "conflict", number>;
+  conflicts: SyncConflict[];
+  committed_at?: string;
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json" },
@@ -252,4 +282,32 @@ export function exportAllModules(): Promise<ExportResult> {
   return request<ExportResult>("/api/export/all", {
     method: "POST",
   });
+}
+
+export function selectMobileSnapshotZip(): Promise<{ zip_path: string }> {
+  return request<{ zip_path: string }>("/api/sync/select-mobile-zip", { method: "POST" });
+}
+
+export function importMobileSnapshot(zipPath: string): Promise<SyncSession> {
+  return request<SyncSession>("/api/sync/import-mobile", { method: "POST", body: JSON.stringify({ zip_path: zipPath }) });
+}
+
+export function getSyncSession(sessionId: string): Promise<SyncSession> {
+  return request<SyncSession>(`/api/sync/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export function resolveEntrySyncConflict(sessionId: string, conflictId: string, body: string, title?: string): Promise<SyncConflict> {
+  return request<SyncConflict>(`/api/sync/sessions/${encodeURIComponent(sessionId)}/resolve-entry`, { method: "POST", body: JSON.stringify({ conflict_id: conflictId, body, title }) });
+}
+
+export function resolveGenericSyncConflict(sessionId: string, conflictId: string, choice: "desktop" | "mobile"): Promise<SyncConflict> {
+  return request<SyncConflict>(`/api/sync/sessions/${encodeURIComponent(sessionId)}/resolve-generic`, { method: "POST", body: JSON.stringify({ conflict_id: conflictId, choice }) });
+}
+
+export function commitSyncImport(sessionId: string): Promise<{ ok: true; safety_backup: string }> {
+  return request<{ ok: true; safety_backup: string }>(`/api/sync/sessions/${encodeURIComponent(sessionId)}/commit`, { method: "POST", body: "{}" });
+}
+
+export function exportDesktopCanonicalZip(): Promise<{ zip_path: string }> {
+  return request<{ zip_path: string }>("/api/sync/export-canonical", { method: "POST", body: "{}" });
 }

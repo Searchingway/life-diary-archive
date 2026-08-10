@@ -23,6 +23,7 @@ if _src not in sys.path:
 
 from life_dairy.exporters import DiaryExportItem
 from life_dairy.models import DiaryEntry, DiaryImage
+from plan_v2 import migrate_plan_to_v2
 
 
 APP_TITLE = "人生档案 Diary Desktop 2.0"
@@ -55,7 +56,7 @@ class ModuleConfig:
 MODULES: list[ModuleConfig] = [
     ModuleConfig("entries", "日记", "entries", "entry.json", ("title",), ("content.md",)),
     ModuleConfig("footprints", "足迹", "footprints", "footprint.json", ("place_name",), ("summary.md",)),
-    ModuleConfig("plans", "轻计划", "plans", "plan.json", ("title",), body_fields=("notes", "reason", "alternative_action")),
+    ModuleConfig("plans", "轻计划", "plans", "plan.json", ("title",), body_fields=("notes", "reason", "alternative_action"), date_fields=("due_date", "start_date", "created_at")),
     ModuleConfig("action_plans", "行动计划", "action_plans", "action_plan.json", ("title",), body_fields=("description", "summary")),
     ModuleConfig("thoughts", "轻思考", "thoughts", "thought.json", ("title",), body_fields=("description", "preliminary_conclusion", "notes")),
     ModuleConfig("resources", "轻资源", "resources", "resource.json", ("title",), body_fields=("description", "overall_judgement", "notes")),
@@ -1044,8 +1045,7 @@ def save_generic_record(module_key: str, payload: dict[str, Any]) -> dict[str, A
     if module.key == "action_plans":
         data.setdefault("tasks", [])
     if module.key == "plans":
-        data.setdefault("tags", [])
-        data.setdefault("plan_type", data.get("plan_type") or "add")
+        data = migrate_plan_to_v2(data)
     write_json(metadata_path, data)
     return record_from_directory(module, record_dir) or {}
 

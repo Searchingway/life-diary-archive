@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "id": "plan_v2_fixture_001",
+  "title": "完整跨平台计划",
+  "goal": "验证 Desktop 与 Mobile 的计划字段可无损往返",
+  "start_date": "2026-08-01",
+  "due_date": "2026-08-31",
+  "status": "已暂停",
+  "priority": "高",
+  "notes": "包含普通字段、清单和减法计划字段。",
+  "tags": ["fixture", "sync"],
+  "tasks": [{"id": "fixture-task-1", "title": "第一项", "scheduled_date": "2026-08-02", "done": false, "note": "任务说明"}],
+  "plan_type": "subtract",
+  "subtract_mode": "不做",
+  "trigger_scene": "夜间",
+  "avoid_behavior": "无目的刷屏",
+  "reason": "保护睡眠",
+  "alternative_action": "阅读十分钟",
+  "created_at": "2026-08-01T08:00:00+08:00",
+  "updated_at": "2026-08-01T08:00:00+08:00",
+  "deleted": false,
+  "deleted_at": ""
+}
