@@ -46,6 +46,7 @@ _entry_locks_guard = threading.Lock()
 _entry_locks: dict[str, threading.RLock] = {}
 _atomic_write_locks_guard = threading.Lock()
 _atomic_write_locks: dict[Path, threading.RLock] = {}
+_data_mutation_lock = threading.RLock()
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,11 @@ def entry_lock(entry_id: str) -> threading.RLock:
 def atomic_write_lock(path: Path) -> threading.RLock:
     with _atomic_write_locks_guard:
         return _atomic_write_locks.setdefault(path.resolve(), threading.RLock())
+
+
+def data_mutation_lock() -> threading.RLock:
+    """Serialize HTTP data mutations with sync's directory-level commit swap."""
+    return _data_mutation_lock
 
 
 def atomic_write_text(path: Path, content: str) -> None:

@@ -7,16 +7,17 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import threading
 import uuid
 import zipfile
 from copy import deepcopy
-from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 import data_api
 from plan_v2 import PLAN_SCHEMA_VERSION, migrate_plan_to_v2
+from src.life_dairy.backup_service import create_backup
 
 
 PROTOCOL_VERSION = 1
@@ -121,7 +122,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
             return self._public_conflict(conflict)
 
     def commit_import(self, session_id: str) -> dict[str, Any]:
-        with _LOCK:
+        with _LOCK, data_api.data_mutation_lock():
             session = self._session(session_id)
             unresolved = [item for item in session["conflicts"] if not item.get("resolved")]
             if unresolved:
@@ -156,6 +157,18 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
                     os.replace(rollback_root, original_root)
                 raise
             session["committed_at"] = data_api.now_iso()
+            for bulky_path in (session_dir / "mobile_snapshot", session_dir / "pre_commit_data", session_dir / "commit_data"):
+                if bulky_path.exists():
+                    shutil.rmtree(bulky_path)
+            data_api.write_json(
+                session_dir / "session.json",
+                {
+                    "id": session["id"],
+                    "committed_at": session["committed_at"],
+                    "safety_backup": session["safety_backup"],
+                    "summary": session["summary"],
+                },
+            )
             return {"ok": True, "id": session_id, "safety_backup": session["safety_backup"], "summary": deepcopy(session["summary"])}
 
     def create_desktop_canonical_zip(self, output_path: str | Path) -> str:
@@ -235,15 +248,15 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 
     def _create_safety_backup(self) -> Path:
         backups = data_api.DATA_ROOT.parent / "sync_backups"
-        backups.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        target = backups / f"desktop-before-mobile-import-{stamp}.zip"
-        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-            if data_api.DATA_ROOT.exists():
-                for path in data_api.DATA_ROOT.rglob("*"):
-                    if path.is_file():
-                        archive.write(path, str(PurePosixPath("Diary") / path.relative_to(data_api.DATA_ROOT).as_posix()))
-        return target
+        if data_api.DATA_ROOT.exists():
+            return create_backup(data_api.DATA_ROOT, backups, filename_prefix="BeforeMobileSyncImport")
+        # A first import may happen before Desktop has created its data root.
+        # Archive an empty Diary tree through the same official backup service,
+        # without creating or mutating the canonical location during preflight.
+        with tempfile.TemporaryDirectory(prefix="life-diary-empty-backup-") as temporary:
+            empty_root = Path(temporary) / "Diary"
+            empty_root.mkdir()
+            return create_backup(empty_root, backups, filename_prefix="BeforeMobileSyncImport")
 
     def _source_records(self, extracted: Path) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
@@ -281,6 +294,12 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
             self._add_action(session, "new", source)
             return
         current_data = data_api.read_json(current_dir / module.json_file)
+        if source["module"] == "footprints":
+            if self._footprint_fingerprint(current_dir) == self._footprint_fingerprint(Path(source["directory"])):
+                self._add_action(session, "unchanged", source)
+            else:
+                self._add_conflict(session, source, self._generic_snapshot(current_dir, module), "footprint semantic content differs")
+            return
         if self._canonical_json(current_data) == self._canonical_json(source["data"]):
             self._add_action(session, "unchanged", source)
             return
@@ -314,12 +333,17 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
         except ValueError:
             body_path = directory / "content.md"
         body = body_path.read_text(encoding="utf-8", errors="replace") if body_path.exists() else str(metadata.get("body") or "")
+        labels: dict[str, str] = {}
+        for raw_image in metadata.get("images", []) if isinstance(metadata.get("images"), list) else []:
+            parsed = data_api.image_metadata(raw_image)
+            if parsed:
+                labels[parsed[0]] = parsed[1]
         images: list[dict[str, str]] = []
         images_dir = directory / "images"
         if images_dir.exists():
             for path in images_dir.iterdir():
                 if path.is_file():
-                    images.append({"file_name": path.name, "hash": _file_hash(path)})
+                    images.append({"file_name": path.name, "hash": _file_hash(path), "label": labels.get(path.name, "")})
         return {
             "id": str(metadata.get("id") or directory.name),
             "date": str(metadata.get("date") or "")[:10],
@@ -372,6 +396,18 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
         data = data_api.read_json(directory / module.json_file)
         return {"id": str(data.get("id") or directory.name), "body": json.dumps(data, ensure_ascii=False, indent=2), "updated_at": str(data.get("updated_at") or ""), "directory": str(directory)}
 
+    def _footprint_fingerprint(self, directory: Path) -> list[dict[str, str]]:
+        """Hash every semantic footprint artifact, deliberately excluding mtimes."""
+        candidates = [directory / "footprint.json", directory / "summary.md"]
+        candidates.extend(directory.glob("visits/*/visit.json"))
+        candidates.extend(directory.glob("visits/*/thought.md"))
+        candidates.extend(path for path in (directory / "visits").glob("*/images/**/*") if path.is_file())
+        candidates.extend(path for path in (directory / "images").rglob("*") if path.is_file())
+        return [
+            {"path": path.relative_to(directory).as_posix(), "hash": _file_hash(path)}
+            for path in sorted({path for path in candidates if path.is_file()})
+        ]
+
     def _apply_source(self, source: dict[str, Any]) -> None:
         if source["module"] == "entries":
             mobile = self._entry_snapshot(Path(source["directory"]), source["data"])
@@ -395,9 +431,16 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
         metadata = data_api.read_json(metadata_path)
         images_dir = record_dir / "images"
         images_dir.mkdir(exist_ok=True)
-        retained: dict[str, str] = {
-            _file_hash(path): path.name for path in images_dir.iterdir() if path.is_file()
+        retained: dict[str, dict[str, str]] = {}
+        existing_labels = {
+            name: label
+            for raw in metadata.get("images", []) if isinstance(metadata.get("images"), list)
+            if (parsed := data_api.image_metadata(raw))
+            for name, label in [parsed]
         }
+        for path in images_dir.iterdir():
+            if path.is_file():
+                retained[_file_hash(path)] = {"file_name": path.name, "label": existing_labels.get(path.name, "")}
         for source in (base, mobile):
             if not source:
                 continue
@@ -405,14 +448,16 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
             for item in source["images"]:
                 content_hash = item["hash"]
                 if content_hash in retained:
+                    if not retained[content_hash]["label"] and str(item.get("label") or ""):
+                        retained[content_hash]["label"] = str(item["label"])
                     continue
                 source_file = source_dir / item["file_name"]
                 if not source_file.exists():
                     continue
                 target_name = item["file_name"] if not (images_dir / item["file_name"]).exists() else data_api.unique_image_name(images_dir, item["file_name"])
                 shutil.copy2(source_file, images_dir / target_name)
-                retained[content_hash] = target_name
-        metadata["images"] = [{"file_name": name, "label": ""} for name in retained.values()]
+                retained[content_hash] = {"file_name": target_name, "label": str(item.get("label") or "")}
+        metadata["images"] = list(retained.values())
         metadata["updated_at"] = data_api.now_iso()
         data_api.write_json(metadata_path, metadata)
 
@@ -460,7 +505,22 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
                     mobile_changed.update(range(right_start, right_end))
             public["desktop_changed_lines"] = sorted(desktop_changed)
             public["mobile_changed_lines"] = sorted(mobile_changed)
+            public["merge_candidate"] = self._merge_candidate(desktop_lines, mobile_lines)
         return public
+
+    def _merge_candidate(self, desktop_lines: list[str], mobile_lines: list[str]) -> str:
+        """Keep shared lines once and mark every independently supplied line."""
+        output: list[str] = []
+        for tag, left_start, left_end, right_start, right_end in difflib.SequenceMatcher(a=desktop_lines, b=mobile_lines).get_opcodes():
+            if tag == "equal":
+                output.extend(desktop_lines[left_start:left_end])
+                continue
+            output.append("<<<<<<< Desktop")
+            output.extend(desktop_lines[left_start:left_end])
+            output.append("=======")
+            output.extend(mobile_lines[right_start:right_end])
+            output.append(">>>>>>> Mobile")
+        return "\n".join(output)
 
     def _public_session(self, session: dict[str, Any]) -> dict[str, Any]:
         return {

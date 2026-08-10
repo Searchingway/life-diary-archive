@@ -25,8 +25,16 @@ Only `entries`, `footprints`, `plans`, and `info_memos` are synchronised. Deskto
 
 ## Plan V2
 
-Plans use `schema_version: 2`; the canonical shared fixture is `shared/sync/fixtures/plan_v2_full.json`. Readers migrate V1 aliases losslessly: `deadline` to `due_date`, `startDate` to `start_date`, `task.date` to `task.scheduled_date`, `暂停` to `已暂停`, and `普通` to `中`.
+Plans use `schema_version: 2`; the canonical shared fixture is `shared/sync/fixtures/plan_v2_full.json`. Readers migrate V1 aliases losslessly: `deadline` to `due_date`, `startDate` to `start_date`, plan `note` to `notes`, and task `scheduledDate` / `date` to `scheduled_date`. Those known aliases are removed from canonical V2 output; unknown extension fields remain unchanged and migration is idempotent.
+
+The only canonical plan statuses are `未开始`, `进行中`, `已暂停`, and `已完成`. Both `搁置` and `暂停` normalise to `已暂停`; priority `普通` normalises to `中`; and historical `plan_type: reduce` normalises to `subtract`. Desktop edits and canonical ZIP output always write those canonical values, while retaining tags and subtract-plan extension fields.
 
 ## Entry conflict policy
 
-`updated_at` is display-only. Same-ID entries are `unchanged` only when normalised date/title/body and image hashes are equal. A strict mobile body/image subset is `stale_mobile` and is ignored. New content, non-identical same-date records, or independent edits are conflicts. A conflict retains the Desktop ID, shows two read-only versions with an editable result, and preserves the union of both image sets by default.
+`updated_at` is display-only. Same-ID entries are `unchanged` only when normalised date/title/body and image hashes are equal. A strict mobile body/image subset is `stale_mobile` and is ignored. New content, non-identical same-date records, or independent edits are conflicts. A conflict retains the Desktop ID, shows PC title/body, editable final title/body, and Mobile title/body. Its initial body candidate preserves shared lines once and every unique line from both copies using conflict markers where necessary. Image union preserves `file_name` and `label`; for a matching hash, a non-empty Desktop label wins, otherwise Mobile's non-empty label is used.
+
+## Footprints, backup, and commit safety
+
+Footprint comparison fingerprints semantic file contents rather than mtimes: `footprint.json`, `summary.md`, every `visits/*/visit.json`, `visits/*/thought.md`, visit images, and place images. Any content difference is staged as a conflict.
+
+Before preflight stages a snapshot, Desktop creates a standard LifeDiary backup ZIP through the shared backup service, including its official `manifest.json`; it can be validated and restored by the normal backup flow. A successful commit uses one global mutation lock around its directory swap and all HTTP write endpoints, then removes the extracted snapshot and temporary pre-commit/working trees while retaining the safety ZIP and a small session metadata file.

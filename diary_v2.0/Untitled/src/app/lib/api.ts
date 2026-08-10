@@ -97,7 +97,7 @@ export interface SyncConflictVersion {
   title?: string;
   body: string;
   updated_at?: string;
-  images?: Array<{ file_name: string }>;
+  images?: Array<{ file_name: string; label?: string }>;
 }
 
 export interface SyncConflict {
@@ -111,6 +111,7 @@ export interface SyncConflict {
   resolved: boolean;
   desktop_changed_lines?: number[];
   mobile_changed_lines?: number[];
+  merge_candidate?: string;
 }
 
 export interface SyncSession {

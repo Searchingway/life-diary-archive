@@ -8,17 +8,37 @@ import { Textarea } from "../components/ui/textarea";
 import { RecordItem, exportModuleTxt, listRecords, promoteLightPlan, saveRecord } from "../lib/api";
 
 function draftPlan(): RecordItem {
+  const today = new Date().toISOString().slice(0, 10);
   return {
     id: "",
     title: "",
     subtitle: "新计划",
     body: "",
-    date: new Date().toISOString().slice(0, 10),
+    date: today,
     updated_at: "",
     type: "add",
     status: "进行中",
-    extra: { plan_type: "add" },
+    extra: {
+      schema_version: 2,
+      plan_type: "add",
+      goal: "",
+      start_date: today,
+      due_date: "",
+      status: "进行中",
+      priority: "中",
+      notes: "",
+      tasks: [],
+      tags: [],
+    },
   };
+}
+
+function planExtra(plan: RecordItem | null): Record<string, unknown> {
+  return plan?.extra && typeof plan.extra === "object" ? plan.extra : {};
+}
+
+function canonicalPlanType(value: unknown): "add" | "subtract" {
+  return value === "subtract" || value === "reduce" ? "subtract" : "add";
 }
 
 export function LightPlan() {
@@ -28,7 +48,20 @@ export function LightPlan() {
   const [filter, setFilter] = useState<"all" | "add" | "reduce" | "completed">("all");
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("正在读取轻计划");
-  const selectedPlanType = String(selected?.extra?.plan_type || selected?.type || "add");
+  const selectedExtra = planExtra(selected);
+  const selectedPlanType = canonicalPlanType(selectedExtra.plan_type || selected?.type);
+
+  function updatePlanExtra(changes: Record<string, unknown>) {
+    if (!selected) return;
+    const extra = { ...planExtra(selected), ...changes, schema_version: 2 };
+    setSelected({
+      ...selected,
+      type: canonicalPlanType(extra.plan_type),
+      status: String(extra.status || selected.status || "进行中"),
+      body: String(extra.notes ?? selected.body ?? ""),
+      extra,
+    });
+  }
 
   async function load(keyword = query) {
     const data = await listRecords("plans", keyword);
@@ -52,16 +85,24 @@ export function LightPlan() {
   }, []);
 
   const filtered = plans.filter((plan) => {
-    const type = String(plan.type || plan.extra?.plan_type || "");
+    const type = canonicalPlanType(planExtra(plan).plan_type || plan.type);
     if (filter === "all") return true;
     if (filter === "completed") return String(plan.status || "").includes("完成");
-    if (filter === "add") return type.includes("add") || type.includes("增");
-    return type.includes("reduce") || type.includes("减");
+    if (filter === "add") return type === "add";
+    return type === "subtract";
   });
 
   async function saveSelected() {
     if (!selected) return null;
-    const saved = await saveRecord("plans", selected);
+    const extra = planExtra(selected);
+    const planType = canonicalPlanType(extra.plan_type || selected.type);
+    const saved = await saveRecord("plans", {
+      ...selected,
+      type: planType,
+      status: String(extra.status || selected.status || "进行中"),
+      body: String(extra.notes ?? selected.body ?? ""),
+      extra: { ...extra, schema_version: 2, plan_type: planType },
+    });
     setSelected(saved);
     setPlans((items) => (items.some((item) => item.id === saved.id) ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items]));
     setMessage("轻计划已保存");
@@ -161,23 +202,24 @@ export function LightPlan() {
                     <Button
                       type="button"
                       size="sm"
-                      variant={selectedPlanType === "add" || selectedPlanType.includes("增") ? "default" : "ghost"}
+                      variant={selectedPlanType === "add" ? "default" : "ghost"}
                       className="h-8"
-                      onClick={() => setSelected({ ...selected, type: "add", extra: { ...(selected.extra ?? {}), plan_type: "add" } })}
+                      onClick={() => updatePlanExtra({ plan_type: "add" })}
                     >
                       增量计划
                     </Button>
                     <Button
                       type="button"
                       size="sm"
-                      variant={selectedPlanType === "reduce" || selectedPlanType.includes("减") ? "default" : "ghost"}
+                      variant={selectedPlanType === "subtract" ? "default" : "ghost"}
                       className="h-8"
-                      onClick={() => setSelected({ ...selected, type: "reduce", extra: { ...(selected.extra ?? {}), plan_type: "reduce" } })}
+                      onClick={() => updatePlanExtra({ plan_type: "subtract" })}
                     >
                       减量计划
                     </Button>
                   </div>
-                  <Input className="w-40" value={selected.date || ""} onChange={(event) => setSelected({ ...selected, date: event.target.value })} />
+                  <Input type="date" className="w-40" aria-label="开始日期" value={String(selectedExtra.start_date || "")} onChange={(event) => updatePlanExtra({ start_date: event.target.value })} />
+                  <Input type="date" className="w-40" aria-label="截止日期" value={String(selectedExtra.due_date || "")} onChange={(event) => updatePlanExtra({ due_date: event.target.value })} />
                 </div>
               </div>
               <div className="flex gap-2">
@@ -196,17 +238,57 @@ export function LightPlan() {
             </div>
 
             <Card>
+              <CardContent className="pt-6 grid gap-4 md:grid-cols-2">
+                <label className="space-y-2 block md:col-span-2">
+                  <span className="font-medium">目标</span>
+                  <Textarea value={String(selectedExtra.goal || "")} onChange={(event) => updatePlanExtra({ goal: event.target.value })} placeholder="这项计划想达成什么" />
+                </label>
+                <label className="space-y-2 block">
+                  <span className="font-medium">状态</span>
+                  <select className="h-10 w-full rounded-md border bg-background px-3" value={String(selectedExtra.status || "进行中")} onChange={(event) => updatePlanExtra({ status: event.target.value })}>
+                    <option value="未开始">未开始</option>
+                    <option value="进行中">进行中</option>
+                    <option value="已暂停">已暂停</option>
+                    <option value="已完成">已完成</option>
+                  </select>
+                </label>
+                <label className="space-y-2 block">
+                  <span className="font-medium">优先级</span>
+                  <select className="h-10 w-full rounded-md border bg-background px-3" value={String(selectedExtra.priority || "中")} onChange={(event) => updatePlanExtra({ priority: event.target.value })}>
+                    <option value="高">高</option>
+                    <option value="中">中</option>
+                    <option value="低">低</option>
+                  </select>
+                </label>
+              </CardContent>
+            </Card>
+
+            <Card>
               <CardContent className="pt-6 space-y-4">
                 <label className="space-y-2 block">
                   <span className="font-medium">计划内容</span>
                   <Textarea
                     autoParagraphIndent
                     className="min-h-[260px] text-base leading-relaxed"
-                    value={selected.body || ""}
-                    onChange={(event) => setSelected({ ...selected, body: event.target.value })}
+                    value={String(selectedExtra.notes ?? selected.body ?? "")}
+                    onChange={(event) => updatePlanExtra({ notes: event.target.value })}
                     placeholder="写下想增加的行动、想减少的行为、原因和替代方案。"
                   />
                 </label>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between"><span className="font-medium">任务</span><Button type="button" size="sm" variant="outline" onClick={() => updatePlanExtra({ tasks: [...(Array.isArray(selectedExtra.tasks) ? selectedExtra.tasks : []), { id: crypto.randomUUID(), title: "", scheduled_date: "", done: false, note: "" }] })}>添加任务</Button></div>
+                  {(Array.isArray(selectedExtra.tasks) ? selectedExtra.tasks : []).map((rawTask, index) => {
+                    const task = rawTask && typeof rawTask === "object" ? rawTask as Record<string, unknown> : {};
+                    const tasks = Array.isArray(selectedExtra.tasks) ? [...selectedExtra.tasks] : [];
+                    const patchTask = (changes: Record<string, unknown>) => { tasks[index] = { ...task, ...changes }; updatePlanExtra({ tasks }); };
+                    return <div className="grid gap-2 rounded border p-3 md:grid-cols-[1fr_10rem_auto]" key={String(task.id || index)}>
+                      <Input aria-label="任务标题" value={String(task.title || "")} onChange={(event) => patchTask({ title: event.target.value })} placeholder="任务标题" />
+                      <Input aria-label="任务日期" type="date" value={String(task.scheduled_date || "")} onChange={(event) => patchTask({ scheduled_date: event.target.value })} />
+                      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(task.done)} onChange={(event) => patchTask({ done: event.target.checked })} />完成</label>
+                      <Input className="md:col-span-3" aria-label="任务备注" value={String(task.note || "")} onChange={(event) => patchTask({ note: event.target.value })} placeholder="任务备注" />
+                    </div>;
+                  })}
+                </div>
                 <div className="flex gap-3">
                   <Button variant="outline" onClick={saveSelected}>
                     <CheckCircle className="size-4" />

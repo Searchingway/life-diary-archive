@@ -8,7 +8,7 @@ from typing import Any
 PLAN_SCHEMA_VERSION = 2
 PLAN_STATUSES = ("未开始", "进行中", "已暂停", "已完成")
 PLAN_PRIORITIES = ("高", "中", "低")
-_STATUS_ALIASES = {"暂停": "已暂停", "已暂停": "已暂停", "未开始": "未开始", "进行中": "进行中", "已完成": "已完成"}
+_STATUS_ALIASES = {"搁置": "已暂停", "暂停": "已暂停", "已暂停": "已暂停", "未开始": "未开始", "进行中": "进行中", "已完成": "已完成"}
 _PRIORITY_ALIASES = {"普通": "中", "中": "中", "高": "高", "低": "低"}
 
 
@@ -36,6 +36,8 @@ def migrate_plan_to_v2(value: dict[str, Any]) -> dict[str, Any]:
         task["scheduled_date"] = str(task.get("scheduled_date") or task.get("scheduledDate") or task.get("date") or "")
         task["done"] = bool(task.get("done"))
         task["note"] = str(task.get("note") or "")
+        task.pop("scheduledDate", None)
+        task.pop("date", None)
         tasks.append(task)
     tags_value = source.get("tags", [])
     tags = [str(item) for item in tags_value if str(item).strip()] if isinstance(tags_value, list) else []
@@ -52,7 +54,7 @@ def migrate_plan_to_v2(value: dict[str, Any]) -> dict[str, Any]:
             "notes": str(source.get("notes") or source.get("note") or ""),
             "tags": tags,
             "tasks": tasks,
-            "plan_type": str(source.get("plan_type") or "add"),
+            "plan_type": "subtract" if str(source.get("plan_type") or "add") == "reduce" else str(source.get("plan_type") or "add"),
             "subtract_mode": str(source.get("subtract_mode") or ""),
             "trigger_scene": str(source.get("trigger_scene") or ""),
             "avoid_behavior": str(source.get("avoid_behavior") or ""),
@@ -64,6 +66,10 @@ def migrate_plan_to_v2(value: dict[str, Any]) -> dict[str, Any]:
             "deleted_at": str(source.get("deleted_at") or ""),
         }
     )
+    # These are recognized historical aliases, not extension fields.  Keeping
+    # them would make a canonical V2 document ambiguous on the next roundtrip.
+    for legacy_key in ("deadline", "startDate", "note"):
+        source.pop(legacy_key, None)
     return source
 
 

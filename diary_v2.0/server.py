@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+import data_api
+
 from data_api import (
     APP_TITLE,
     DATA_ROOT,
@@ -105,6 +107,10 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         self.serve_frontend(parsed.path)
 
     def do_POST(self) -> None:
+        with data_api.data_mutation_lock():
+            self._do_POST()
+
+    def _do_POST(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/actions/open-data-root":
             os.startfile(DATA_ROOT)  # type: ignore[attr-defined]
@@ -266,6 +272,10 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
 
     def do_PUT(self) -> None:
+        with data_api.data_mutation_lock():
+            self._do_PUT()
+
+    def _do_PUT(self) -> None:
         parsed = urlparse(self.path)
         image_match = re.fullmatch(r"/api/modules/entries/([^/]+)/images", parsed.path)
         if image_match:
@@ -290,6 +300,10 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND, "unknown endpoint")
 
     def do_DELETE(self) -> None:
+        with data_api.data_mutation_lock():
+            self._do_DELETE()
+
+    def _do_DELETE(self) -> None:
         parsed = urlparse(self.path)
         if not parsed.path.startswith("/api/modules/"):
             self.send_error(HTTPStatus.NOT_FOUND, "unknown endpoint")

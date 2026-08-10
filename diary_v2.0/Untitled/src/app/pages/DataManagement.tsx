@@ -10,6 +10,7 @@ export function DataManagement() {
   const [exporting, setExporting] = useState(false);
   const [syncSession, setSyncSession] = useState<SyncSession | null>(null);
   const [mergeBodies, setMergeBodies] = useState<Record<string, string>>({});
+  const [mergeTitles, setMergeTitles] = useState<Record<string, string>>({});
   const [syncBusy, setSyncBusy] = useState(false);
   const [message, setMessage] = useState("正在检查数据");
 
@@ -60,7 +61,14 @@ export function DataManagement() {
     setMergeBodies((current) => {
       const updated = { ...current };
       next.conflicts.forEach((conflict) => {
-        if (updated[conflict.id] === undefined) updated[conflict.id] = conflict.desktop.body;
+        if (updated[conflict.id] === undefined) updated[conflict.id] = conflict.merge_candidate ?? conflict.desktop.body;
+      });
+      return updated;
+    });
+    setMergeTitles((current) => {
+      const updated = { ...current };
+      next.conflicts.forEach((conflict) => {
+        if (updated[conflict.id] === undefined) updated[conflict.id] = conflict.desktop.title ?? "";
       });
       return updated;
     });
@@ -72,7 +80,8 @@ export function DataManagement() {
       const selected = await selectMobileSnapshotZip();
       const session = await importMobileSnapshot(selected.zip_path);
       setSyncSession(session);
-      setMergeBodies(Object.fromEntries(session.conflicts.map((conflict) => [conflict.id, conflict.desktop.body])));
+      setMergeBodies(Object.fromEntries(session.conflicts.map((conflict) => [conflict.id, conflict.merge_candidate ?? conflict.desktop.body])));
+      setMergeTitles(Object.fromEntries(session.conflicts.map((conflict) => [conflict.id, conflict.desktop.title ?? ""])));
       setMessage(`手机版导入已预检：${session.summary.conflict} 个待处理冲突。安全备份：${session.safety_backup}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "手机版 ZIP 导入失败");
@@ -86,7 +95,8 @@ export function DataManagement() {
     setSyncBusy(true);
     try {
       const body = choice === "desktop" ? conflict.desktop.body : choice === "mobile" ? conflict.mobile.body : mergeBodies[conflict.id] ?? "";
-      await resolveEntrySyncConflict(syncSession.id, conflict.id, body);
+      const title = choice === "desktop" ? conflict.desktop.title ?? "" : choice === "mobile" ? conflict.mobile.title ?? "" : mergeTitles[conflict.id] ?? "";
+      await resolveEntrySyncConflict(syncSession.id, conflict.id, body, title);
       await refreshSession(syncSession.id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存冲突解决结果失败");
@@ -179,9 +189,9 @@ export function DataManagement() {
                 </div>
                 {conflict.module === "entries" ? <>
                   <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-                    <div className="rounded border"><p className="px-3 py-2 font-medium bg-secondary">PC 当前版本（只读）</p>{renderVersion(conflict.desktop.body, conflict.desktop_changed_lines, "bg-red-100 dark:bg-red-950")}</div>
-                    <div className="rounded border"><p className="px-3 py-2 font-medium bg-secondary">最终合并结果（可编辑）</p><textarea className="w-full min-h-48 p-3 bg-transparent text-sm leading-6" value={mergeBodies[conflict.id] ?? conflict.desktop.body} onChange={(event) => setMergeBodies((current) => ({ ...current, [conflict.id]: event.target.value }))} disabled={conflict.resolved || syncBusy} /></div>
-                    <div className="rounded border"><p className="px-3 py-2 font-medium bg-secondary">Mobile 版本（只读）</p>{renderVersion(conflict.mobile.body, conflict.mobile_changed_lines, "bg-green-100 dark:bg-green-950")}</div>
+                    <div className="rounded border"><p className="px-3 py-2 font-medium bg-secondary">PC 当前版本（只读）</p><p className="px-3 py-2 border-b text-sm font-medium">{conflict.desktop.title}</p>{renderVersion(conflict.desktop.body, conflict.desktop_changed_lines, "bg-red-100 dark:bg-red-950")}</div>
+                    <div className="rounded border"><p className="px-3 py-2 font-medium bg-secondary">最终合并结果（可编辑）</p><input className="w-full border-b p-3 bg-transparent text-sm font-medium" value={mergeTitles[conflict.id] ?? conflict.desktop.title ?? ""} onChange={(event) => setMergeTitles((current) => ({ ...current, [conflict.id]: event.target.value }))} disabled={conflict.resolved || syncBusy} aria-label="最终标题" /><textarea className="w-full min-h-48 p-3 bg-transparent text-sm leading-6" value={mergeBodies[conflict.id] ?? conflict.merge_candidate ?? conflict.desktop.body} onChange={(event) => setMergeBodies((current) => ({ ...current, [conflict.id]: event.target.value }))} disabled={conflict.resolved || syncBusy} /></div>
+                    <div className="rounded border"><p className="px-3 py-2 font-medium bg-secondary">Mobile 版本（只读）</p><p className="px-3 py-2 border-b text-sm font-medium">{conflict.mobile.title}</p>{renderVersion(conflict.mobile.body, conflict.mobile_changed_lines, "bg-green-100 dark:bg-green-950")}</div>
                   </div>
                   <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={conflict.resolved || syncBusy} onClick={() => resolveEntry(conflict, "desktop")}>采用电脑版本</Button><Button size="sm" variant="outline" disabled={conflict.resolved || syncBusy} onClick={() => resolveEntry(conflict, "mobile")}>采用手机版本</Button><Button size="sm" disabled={conflict.resolved || syncBusy} onClick={() => resolveEntry(conflict)}>保存并解决</Button></div>
                 </> : <>

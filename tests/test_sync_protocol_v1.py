@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import threading
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +18,7 @@ if str(V2) not in sys.path:
 import data_api
 from plan_v2 import migrate_plan_to_v2
 from sync_service import SyncService
+from src.life_dairy.backup_service import restore_backup, validate_backup
 
 
 class SyncProtocolV1Tests(unittest.TestCase):
@@ -59,6 +62,36 @@ class SyncProtocolV1Tests(unittest.TestCase):
         self.assertEqual("已暂停", migrated["status"])
         self.assertEqual("中", migrated["priority"])
         self.assertEqual("preserved", migrated["custom_mobile_field"])
+        self.assertEqual(migrated, migrate_plan_to_v2(migrated))
+
+    def test_plan_migration_removes_known_aliases_and_normalises_all_accepted_values(self) -> None:
+        migrated = migrate_plan_to_v2(
+            {
+                "id": "alias_plan",
+                "startDate": "2026-08-01",
+                "deadline": "2026-08-31",
+                "note": "canonical notes",
+                "status": "搁置",
+                "priority": "普通",
+                "plan_type": "reduce",
+                "unknown_extension": {"preserve": True},
+                "tasks": [{"id": "one", "title": "Task", "scheduledDate": "2026-08-03", "date": "legacy"}],
+            }
+        )
+
+        self.assertEqual("已暂停", migrated["status"])
+        self.assertEqual("中", migrated["priority"])
+        self.assertEqual("subtract", migrated["plan_type"])
+        self.assertEqual("2026-08-01", migrated["start_date"])
+        self.assertEqual("2026-08-31", migrated["due_date"])
+        self.assertEqual("canonical notes", migrated["notes"])
+        self.assertEqual("2026-08-03", migrated["tasks"][0]["scheduled_date"])
+        self.assertNotIn("startDate", migrated)
+        self.assertNotIn("deadline", migrated)
+        self.assertNotIn("note", migrated)
+        self.assertNotIn("scheduledDate", migrated["tasks"][0])
+        self.assertNotIn("date", migrated["tasks"][0])
+        self.assertEqual({"preserve": True}, migrated["unknown_extension"])
         self.assertEqual(migrated, migrate_plan_to_v2(migrated))
 
     def test_desktop_plan_save_upgrades_v1_and_reads_shared_fixture(self) -> None:
@@ -164,6 +197,129 @@ class SyncProtocolV1Tests(unittest.TestCase):
         self.assertEqual("pc_id", record["id"])
         self.assertEqual("Merged text", record["body"])
         self.assertEqual({"pc.png", "mobile.png"}, {image["file_name"] for image in record["extra"]["images"]})
+
+    def test_entry_conflict_preserves_labels_titles_and_a_non_lossy_merge_candidate(self) -> None:
+        data_api.save_entry({"id": "entry", "date": "2026-08-03", "title": "PC title", "body": "common\nPC only\nend"})
+        data_api.add_entry_images("entry", {"files": [{"name": "shared.png", "data": "c2hhcmVk", "label": "Desktop label"}, {"name": "blank.png", "data": "Ymxhbms=", "label": ""}]})
+        package = self._mobile_zip(
+            {
+                "Diary/entries/entry/entry.json": json.dumps({"id": "entry", "date": "2026-08-03", "title": "Mobile title", "images": [{"file_name": "shared.png", "label": "Mobile label"}, {"file_name": "blank.png", "label": "Mobile fallback"}, {"file_name": "mobile.png", "label": "Mobile only"}]}),
+                "Diary/entries/entry/content.md": "common\nMobile only\nend",
+                "Diary/entries/entry/images/shared.png": b"shared",
+                "Diary/entries/entry/images/blank.png": b"blank",
+                "Diary/entries/entry/images/mobile.png": b"mobile",
+            }
+        )
+        session = self.service.prepare_mobile_import(package)
+        conflict = session["conflicts"][0]
+
+        self.assertIn("PC only", conflict["merge_candidate"])
+        self.assertIn("Mobile only", conflict["merge_candidate"])
+        self.assertEqual(1, conflict["merge_candidate"].count("common"))
+        self.assertEqual("PC title", conflict["desktop"]["title"])
+        self.assertEqual("Mobile title", conflict["mobile"]["title"])
+        self.service.resolve_entry_conflict(session["id"], conflict["id"], "Merged", "Final title")
+        self.service.commit_import(session["id"])
+        record = data_api.list_module_records("entries")[0]
+        self.assertEqual("Final title", record["title"])
+        labels = {image["file_name"]: image["label"] for image in record["extra"]["images"]}
+        self.assertEqual("Desktop label", labels["shared.png"])
+        self.assertEqual("Mobile fallback", labels["blank.png"])
+        self.assertEqual("Mobile only", labels["mobile.png"])
+
+    def test_footprint_auxiliary_content_difference_is_a_conflict(self) -> None:
+        data_api.save_generic_record("footprints", {"id": "place", "title": "Place", "body": "same", "date": "2026-08-03"})
+        record_dir = data_api.DATA_ROOT / "footprints" / "place"
+        (record_dir / "summary.md").write_text("Desktop summary", encoding="utf-8")
+        visit_dir = record_dir / "visits" / "visit-1"
+        visit_dir.mkdir(parents=True)
+        data_api.write_json(visit_dir / "visit.json", {"id": "visit-1", "date": "2026-08-03"})
+        (visit_dir / "thought.md").write_text("same thought", encoding="utf-8")
+        (visit_dir / "images").mkdir()
+        (visit_dir / "images" / "visit.png").write_bytes(b"visit")
+        (record_dir / "images").mkdir()
+        (record_dir / "images" / "place.png").write_bytes(b"place")
+        footprint = data_api.read_json(record_dir / "footprint.json")
+        package = self._mobile_zip(
+            {
+                "Diary/footprints/place/footprint.json": json.dumps(footprint),
+                "Diary/footprints/place/summary.md": "Mobile summary",
+                "Diary/footprints/place/visits/visit-1/visit.json": json.dumps({"id": "visit-1", "date": "2026-08-03"}),
+                "Diary/footprints/place/visits/visit-1/thought.md": "same thought",
+                "Diary/footprints/place/visits/visit-1/images/visit.png": b"visit",
+                "Diary/footprints/place/images/place.png": b"place",
+            }
+        )
+
+        self.assertEqual(1, self.service.prepare_mobile_import(package)["summary"]["conflict"])
+
+    def test_import_safety_backup_is_official_and_restorable(self) -> None:
+        data_api.save_entry({"id": "before", "date": "2026-08-03", "title": "Before", "body": "saved"})
+        session = self.service.prepare_mobile_import(self._mobile_zip({}))
+        backup = Path(session["safety_backup"])
+
+        self.assertTrue(validate_backup(backup)[0])
+        restore_root = self.root / "restore" / "Diary"
+        restore_root.mkdir(parents=True)
+        data_api.DATA_ROOT = restore_root
+        data_api.save_entry({"id": "other", "date": "2026-08-04", "title": "Other", "body": "replace"})
+        restore_backup(backup, restore_root, self.root / "restore_backups")
+        self.assertEqual(["before"], [item["id"] for item in data_api.list_module_records("entries")])
+
+    def test_commit_cleans_bulky_session_content_but_keeps_metadata(self) -> None:
+        package = self._mobile_zip(
+            {
+                "Diary/entries/new/entry.json": json.dumps({"id": "new", "date": "2026-08-03", "title": "New", "images": []}),
+                "Diary/entries/new/content.md": "new body",
+            }
+        )
+        session = self.service.prepare_mobile_import(package)
+        session_dir = Path(self.service._session(session["id"])["session_dir"])
+        self.assertTrue((session_dir / "mobile_snapshot").exists())
+
+        self.service.commit_import(session["id"])
+
+        self.assertFalse((session_dir / "mobile_snapshot").exists())
+        self.assertFalse((session_dir / "pre_commit_data").exists())
+        self.assertFalse((session_dir / "commit_data").exists())
+        self.assertTrue((session_dir / "session.json").exists())
+
+    def test_commit_swap_serializes_with_ordinary_data_mutation_lock(self) -> None:
+        session = self.service.prepare_mobile_import(
+            self._mobile_zip(
+                {
+                    "Diary/entries/new/entry.json": json.dumps({"id": "new", "date": "2026-08-03", "title": "New", "images": []}),
+                    "Diary/entries/new/content.md": "new body",
+                }
+            )
+        )
+        swap_started = threading.Event()
+        allow_swap = threading.Event()
+        writer_finished = threading.Event()
+        original_replace = __import__("sync_service").os.replace
+
+        def paused_replace(source: str | Path, target: str | Path) -> None:
+            swap_started.set()
+            self.assertTrue(allow_swap.wait(3))
+            original_replace(source, target)
+
+        def ordinary_write() -> None:
+            with data_api.data_mutation_lock():
+                data_api.save_entry({"id": "ordinary", "date": "2026-08-04", "title": "Ordinary", "body": "write"})
+            writer_finished.set()
+
+        with patch("sync_service.os.replace", side_effect=paused_replace):
+            commit_thread = threading.Thread(target=lambda: self.service.commit_import(session["id"]))
+            commit_thread.start()
+            self.assertTrue(swap_started.wait(3))
+            writer = threading.Thread(target=ordinary_write)
+            writer.start()
+            self.assertFalse(writer_finished.wait(0.15))
+            allow_swap.set()
+            commit_thread.join(3)
+            writer.join(3)
+        self.assertFalse(commit_thread.is_alive())
+        self.assertTrue(writer_finished.is_set())
 
     def test_canonical_zip_contains_only_shared_modules_and_v1_manifest(self) -> None:
         data_api.save_entry({"id": "entry_1", "date": "2026-08-01", "title": "Entry", "body": "Body"})

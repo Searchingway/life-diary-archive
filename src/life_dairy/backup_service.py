@@ -156,7 +156,7 @@ def validate_backup(zip_path: Path | str) -> tuple[bool, str]:
                 logger.warning("备份包缺少 Diary/ 目录: %s", zip_path)
                 return False, "备份包中缺少 Diary/ 数据目录"
 
-            if not _has_known_module(names):
+            if not _has_known_module(names) and manifest.get("modules"):
                 logger.warning("备份包无可识别数据模块: %s", zip_path)
                 return False, "Diary/ 下没有可识别的数据模块目录"
 
