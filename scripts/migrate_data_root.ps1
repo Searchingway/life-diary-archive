@@ -108,13 +108,37 @@ function Copy-DirectoryExact([string]$Source, [string]$Target) {
     & robocopy $Source $Target /E /COPY:DAT /DCOPY:DAT /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null
     $code = $LASTEXITCODE
     if ($code -ge 8) {
-        throw "robocopy 复制失败，退出码：$code。源目录未删除，bootstrap 未修改。"
+        throw "robocopy 复制失败，退出码：$code。源目录未删除，软件路径未修改。"
     }
 }
 
 function Assert-ManifestsEqual($Expected, $Actual, [string]$Label) {
     if ($Expected.Text -ne $Actual.Text) {
-        throw "$Label 校验失败：文件路径、大小或 SHA-256 不一致。源目录未删除，bootstrap 未修改。"
+        throw "$Label 校验失败：文件路径、大小或 SHA-256 不一致。源目录未删除，软件路径未修改。"
+    }
+}
+
+function Capture-Bootstrap([string]$BootstrapPath) {
+    if (Test-Path -LiteralPath $BootstrapPath -PathType Leaf) {
+        return [pscustomobject]@{
+            Existed = $true
+            Bytes = [System.IO.File]::ReadAllBytes($BootstrapPath)
+        }
+    }
+    return [pscustomobject]@{
+        Existed = $false
+        Bytes = $null
+    }
+}
+
+function Restore-Bootstrap([string]$BootstrapPath, $Snapshot) {
+    if ($Snapshot.Existed) {
+        $directory = Split-Path -Parent $BootstrapPath
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        [System.IO.File]::WriteAllBytes($BootstrapPath, [byte[]]$Snapshot.Bytes)
+    }
+    elseif (Test-Path -LiteralPath $BootstrapPath -PathType Leaf) {
+        Remove-Item -LiteralPath $BootstrapPath -Force
     }
 }
 
@@ -142,6 +166,7 @@ $bootstrapPath = Get-BootstrapPath
 $source = Get-CurrentDataRoot $repoRoot $bootstrapPath
 $destination = Get-NormalizedPath $Destination
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$bootstrapSnapshot = Capture-Bootstrap $bootstrapPath
 
 Write-Host "Life Diary 安全数据迁移" -ForegroundColor Cyan
 Write-Host "当前数据目录: $source"
@@ -204,12 +229,25 @@ $destinationManifest = Get-DirectoryManifest $destination
 Assert-ManifestsEqual $sourceAfter $destinationManifest "目标目录"
 Write-Host "      目标副本 SHA-256 全部一致" -ForegroundColor Green
 
-Write-Host "[6/6] 写入软件自定义数据路径……"
-Write-BootstrapAtomically $bootstrapPath $destination $stamp
+Write-Host "[6/6] 再次确认软件未启动，然后写入软件自定义数据路径……"
+Assert-LifeDiaryClosed
+try {
+    Write-BootstrapAtomically $bootstrapPath $destination $stamp
 
-$finalSource = Get-DirectoryManifest $source
-if ($finalSource.Text -ne $sourceAfter.Text) {
-    throw "写入配置时检测到旧目录又发生了变化。请不要启动软件，并人工检查两份数据；原目录和 E 盘副本均未删除。"
+    $finalSource = Get-DirectoryManifest $source
+    if ($finalSource.Text -ne $sourceAfter.Text) {
+        throw "写入配置时检测到旧目录又发生了变化。"
+    }
+}
+catch {
+    $migrationError = $_
+    try {
+        Restore-Bootstrap $bootstrapPath $bootstrapSnapshot
+    }
+    catch {
+        throw "迁移校验失败，而且 bootstrap 自动回滚也失败。请不要启动软件。原数据仍在：$source；E 盘副本仍在：$destination；bootstrap：$bootstrapPath。"
+    }
+    throw "$($migrationError.Exception.Message) 软件路径已自动回滚到迁移前状态；原目录和 E 盘副本均未删除。"
 }
 
 Write-Host ""
