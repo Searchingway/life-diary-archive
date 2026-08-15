@@ -82,6 +82,7 @@ export default function FootprintsScreen() {
           />
           <Field
             label="地点描述"
+            autoParagraphIndent
             multiline
             onChangeText={(body) => setDraft({ ...draft, body })}
             value={draft.body}
@@ -101,8 +102,9 @@ export default function FootprintsScreen() {
               value={visit.date}
             />
             <Field
-              label="这次的想法"
-              multiline
+            label="这次的想法"
+            autoParagraphIndent
+            multiline
               onChangeText={(thought) =>
                 setVisits(visits.map((item) => (item.id === visit.id ? { ...item, thought, updatedAt: new Date().toISOString() } : item)))
               }

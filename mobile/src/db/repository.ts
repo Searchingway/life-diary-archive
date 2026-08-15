@@ -11,6 +11,8 @@ export interface RecordRepository {
   count(module: ModuleKey): Promise<number>;
   replaceAll(records: ArchiveRecord[]): Promise<void>;
   replaceSharedModules(records: ArchiveRecord[]): Promise<void>;
+  getMeta(key: string): Promise<string | null>;
+  setMeta(key: string, value: string | null): Promise<void>;
 }
 
 const sharedModules = new Set<ModuleKey>(SHARED_MODULES);
@@ -66,6 +68,7 @@ function normalize(record: NewRecord, existing?: ArchiveRecord | null): ArchiveR
 
 export function createMemoryRecordRepository(): RecordRepository {
   const records = new Map<string, ArchiveRecord>();
+  const metadata = new Map<string, string>();
   return {
     async list(module, query = "") {
       const keyword = query.trim().toLocaleLowerCase();
@@ -105,6 +108,8 @@ export function createMemoryRecordRepository(): RecordRepository {
       for (const [id, record] of records) if (sharedModules.has(record.module)) records.delete(id);
       nextRecords.forEach((record) => records.set(record.id, record));
     },
+    async getMeta(key) { return metadata.get(key) ?? null; },
+    async setMeta(key, value) { if (value === null) metadata.delete(key); else metadata.set(key, value); },
   };
 }
 
@@ -250,6 +255,21 @@ export function createSqliteRecordRepository(database: SQLiteDatabase): RecordRe
           );
         }
       });
+    },
+    async getMeta(key) {
+      const row = await database.getFirstAsync<{ value: string }>("SELECT value FROM app_meta WHERE key=?", key);
+      return row?.value ?? null;
+    },
+    async setMeta(key, value) {
+      if (value === null) {
+        await database.runAsync("DELETE FROM app_meta WHERE key=?", key);
+        return;
+      }
+      await database.runAsync(
+        "INSERT INTO app_meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        key,
+        value,
+      );
     },
   };
 }

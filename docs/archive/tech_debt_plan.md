@@ -95,3 +95,5 @@
 - 当前架构虽然不够优雅，但功能稳定
 - 用户数据完整，测试覆盖基本可用
 - 大规模重写风险高，收益不确定
+> ARCHIVED / HISTORICAL DOCUMENT
+> 不代表当前实现，请阅读 docs/CURRENT.md

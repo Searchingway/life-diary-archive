@@ -38,6 +38,14 @@ export interface Overview {
   dashboard_stats: DashboardStats;
   modules: ModuleInfo[];
   recent: Array<RecordItem & { module: string; module_key: ModuleKey }>;
+  build: { version: string; commit: string };
+}
+
+export interface DataRootStatus {
+  data_root: string;
+  default_data_root: string;
+  bootstrap_path: string;
+  source: "environment" | "bootstrap" | "default";
 }
 
 export interface DashboardStats {
@@ -158,6 +166,21 @@ export function deleteRecord(moduleKey: ModuleKey, id: string): Promise<{ ok: tr
 
 export function openDataRoot(): Promise<{ ok: true }> {
   return request<{ ok: true }>("/api/actions/open-data-root", { method: "POST" });
+}
+
+export function getDataRootStatus(): Promise<DataRootStatus> {
+  return request<DataRootStatus>("/api/data-root");
+}
+
+export function selectDataRootDirectory(): Promise<{ selected_path: string }> {
+  return request<{ selected_path: string }>("/api/actions/select-data-root", { method: "POST" });
+}
+
+export function migrateDataRoot(destination: string): Promise<{ data_root: string; safety_backup: string; restart_required: string }> {
+  return request<{ data_root: string; safety_backup: string; restart_required: string }>("/api/actions/migrate-data-root", {
+    method: "POST",
+    body: JSON.stringify({ destination }),
+  });
 }
 
 export function getSettings(): Promise<AppSettings> {

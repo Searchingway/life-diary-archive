@@ -1,5 +1,7 @@
 # AGENTS.md
 
+当前应用和数据事实请先读 [docs/CURRENT.md](docs/CURRENT.md)；本文件只定义仓库协作规则。
+
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Commands
@@ -128,7 +130,7 @@ launcher.py 只是桌面壳，去掉它 server.py 可以独立运行（只是没
 中:   OpenSpec change 下的 state-model.md
 中:   docs/lifecycle/COMMON_LIFECYCLE.md（通用生命周期）
 低:   docs/lifecycle/PAGE_LIFECYCLES.md（页面专用生命周期）
-低:   docs/状态模型_Next.md
+低:   docs/CURRENT.md（当前应用与数据事实）
 ```
 
 ### 必须读取的文档

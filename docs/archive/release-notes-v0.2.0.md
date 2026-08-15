@@ -12,3 +12,5 @@
 ## Distribution
 
 Windows installer EXE and Android APK are release artifacts. Keep them in GitHub Releases rather than committing them to the source repository.
+> ARCHIVED / HISTORICAL DOCUMENT
+> 不代表当前实现，请阅读 docs/CURRENT.md

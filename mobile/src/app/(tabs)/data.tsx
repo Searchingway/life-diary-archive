@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import Constants from "expo-constants";
 
 import { ButtonRow, Panel, PrimaryButton, SecondaryButton } from "@/components/Controls";
 import { Screen } from "@/components/Screen";
@@ -8,6 +9,7 @@ import { StatusBanner } from "@/components/StatusBanner";
 import { useRepository } from "@/db/RepositoryContext";
 import { applyDesktopCanonicalImport, createBackup, createMobileSnapshot, importLegacyArchive, legacyArchiveExists, loadDesktopCanonicalImport, pickAndRestoreBackup, pickDesktopCanonicalImport, type DesktopCanonicalImport } from "@/services/backup";
 import { consumeIncomingUri } from "@/compat/incomingIntent";
+import { clearExternalBackupDirectory, copyZipToExternalBackupDirectory, getExternalBackupDirectory, selectExternalBackupDirectory } from "@/services/externalBackup";
 import { colors, spacing } from "@/theme";
 
 export default function DataScreen() {
@@ -17,13 +19,15 @@ export default function DataScreen() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState(false);
   const [canonicalImport, setCanonicalImport] = useState<DesktopCanonicalImport | null>(null);
+  const [externalBackupDirectory, setExternalBackupDirectory] = useState<string | null>(null);
   const params = useLocalSearchParams<{ incoming?: string }>();
   const lastIncoming = useRef("");
 
   useFocusEffect(
     useCallback(() => {
       void legacyArchiveExists().then(setLegacyAvailable);
-    }, []),
+      void getExternalBackupDirectory(repository).then(setExternalBackupDirectory);
+    }, [repository]),
   );
 
   async function run(action: () => Promise<unknown>, success: (value: unknown) => string) {
@@ -63,6 +67,36 @@ export default function DataScreen() {
         onPress: () => run(() => importLegacyArchive(repository), (value) => `已导入 ${value} 条旧版记录`),
       },
     ]);
+  }
+
+  function selectExternalBackupDirectoryAction() {
+    void run(
+      async () => {
+        const selected = await selectExternalBackupDirectory(repository);
+        if (!selected) throw new Error("未授予外置备份目录权限");
+        setExternalBackupDirectory(selected);
+        return selected;
+      },
+      () => "外置备份目录已保存",
+    );
+  }
+
+  function createExternalBackup() {
+    void run(
+      async () => {
+        const directory = externalBackupDirectory ?? await getExternalBackupDirectory(repository);
+        if (!directory) throw new Error("请先选择外置备份目录");
+        const localZip = await createBackup(repository, false);
+        try {
+          return await copyZipToExternalBackupDirectory(directory, localZip);
+        } catch (reason) {
+          await clearExternalBackupDirectory(repository);
+          setExternalBackupDirectory(null);
+          throw new Error(`写入外置目录失败，已清除该目录授权，请重新选择。${reason instanceof Error ? ` ${reason.message}` : ""}`);
+        }
+      },
+      () => "外置 ZIP 备份已写入所选目录",
+    );
   }
 
   async function selectDesktopCanonical() {
@@ -111,6 +145,18 @@ export default function DataScreen() {
       </Panel>
       <Panel>
         <View style={styles.block}>
+          <Text style={styles.title}>外置备份目录（Android）</Text>
+          <Text style={styles.body}>手机记录和 SQLite 仍保存在应用私有目录；这里只保存你授权的 ZIP 输出位置，不迁移数据库。</Text>
+          <Text style={styles.path}>{externalBackupDirectory || "尚未选择"}</Text>
+          <ButtonRow>
+            <SecondaryButton disabled={busy} label="选择目录" onPress={selectExternalBackupDirectoryAction} />
+            <PrimaryButton disabled={busy || !externalBackupDirectory} label="备份到此目录" onPress={createExternalBackup} />
+          </ButtonRow>
+          {externalBackupDirectory ? <SecondaryButton disabled={busy} label="清除目录授权" onPress={() => void run(async () => { await clearExternalBackupDirectory(repository); setExternalBackupDirectory(null); }, () => "已清除外置备份目录") } /> : null}
+        </View>
+      </Panel>
+      <Panel>
+        <View style={styles.block}>
           <Text style={styles.title}>电脑同步</Text>
           <Text style={styles.body}>导出到电脑会生成 Mobile Snapshot ZIP；从电脑同步只接受 Desktop Canonical ZIP，确认前不会覆盖手机数据。</Text>
           <PrimaryButton disabled={busy} label="导出到电脑（Mobile Snapshot）" onPress={() => run(() => createMobileSnapshot(repository), () => "Mobile Snapshot ZIP 已生成")} />
@@ -150,6 +196,7 @@ export default function DataScreen() {
       <Text style={styles.note}>
         应用不会上传你的记录。卸载应用前请先导出 ZIP 备份；Android 卸载会清除应用私有目录。
       </Text>
+      <Text style={styles.note}>版本 {Constants.expoConfig?.version ?? "dev"} · 构建 {Constants.nativeBuildVersion ?? "dev"} · 提交 {process.env.EXPO_PUBLIC_GIT_COMMIT?.slice(0, 12) ?? "dev"}</Text>
     </Screen>
   );
 }
@@ -158,6 +205,7 @@ const styles = StyleSheet.create({
   block: { gap: spacing.sm },
   title: { color: colors.ink, fontSize: 17, fontWeight: "700" },
   body: { color: colors.muted, lineHeight: 21 },
+  path: { color: colors.muted, fontSize: 12, lineHeight: 18 },
   note: { color: colors.muted, fontSize: 13, lineHeight: 20 },
   preview: { gap: spacing.sm, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
 });

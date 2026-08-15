@@ -1108,3 +1108,5 @@ OPEN_PREVIEW(title, content, warning?) | CONFIRM | CANCEL | SHOW_ERROR | SHOW_RA
 - AI 返回内容超长 → 弹窗应有滚动
 - 多次快速连续调用 AI → 上一次的预览应被覆盖或取消
 - 弹窗已打开时再次触发 AI 调用 → 先关闭再重新打开
+> ARCHIVED / HISTORICAL DOCUMENT
+> 不代表当前实现，请阅读 docs/CURRENT.md

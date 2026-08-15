@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert } from "react-native";
 
 import { ButtonRow, Field, Panel, PrimaryButton, SecondaryButton } from "@/components/Controls";
@@ -20,31 +20,47 @@ export default function DiaryScreen() {
   const [draft, setDraft] = useState<NewRecord | null>(null);
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
+  const draftRef = useRef<NewRecord | null>(null);
+  const flushRef = useRef<() => Promise<void>>(async () => undefined);
   const images = useMemo(() => (Array.isArray(draft?.extra.images) ? (draft?.extra.images as ImageRef[]) : []), [draft]);
+
+  draftRef.current = draft;
+
+  flushRef.current = async () => {
+    const pending = draftRef.current;
+    if (!pending || (!pending.id && !pending.title && !pending.body)) return;
+    try {
+      const wasNew = !pending.id;
+      const saved = await repository.save(pending);
+      if (wasNew && draftRef.current === pending) setDraft(editable(saved));
+      setMessage("已自动保存");
+      await refresh(query);
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : String(reason));
+      throw reason;
+    }
+  };
 
   useEffect(() => {
     if (!draft || (!draft.id && !draft.title && !draft.body)) return;
-    const timer = setTimeout(async () => {
-      try {
-        const wasNew = !draft.id;
-        const saved = await repository.save(draft);
-        if (wasNew) setDraft(editable(saved));
-        setMessage("已自动保存");
-        await refresh(query);
-      } catch (reason) {
-        setMessage(reason instanceof Error ? reason.message : String(reason));
-      }
-    }, 3000);
+    const timer = setTimeout(() => { void flushRef.current().catch(() => undefined); }, 3000);
     return () => clearTimeout(timer);
   }, [draft, query, refresh, repository]);
 
+  useEffect(() => () => { void flushRef.current().catch(() => undefined); }, []);
+
   async function save() {
-    if (!draft) return;
-    const wasNew = !draft.id;
-    const saved = await repository.save(draft);
-    if (wasNew) setDraft(editable(saved));
+    await flushRef.current();
     setMessage("已保存到本机");
-    await refresh(query);
+  }
+
+  async function returnToList() {
+    try {
+      await flushRef.current();
+      setDraft(null);
+    } catch {
+      // Keep the editor open when the final safety flush fails.
+    }
   }
 
   function remove() {
@@ -66,7 +82,7 @@ export default function DiaryScreen() {
   if (draft) {
     return (
       <Screen
-        action={<SecondaryButton label="返回列表" onPress={() => setDraft(null)} />}
+        action={<SecondaryButton label="返回列表" onPress={() => { void returnToList(); }} />}
         subtitle="正文每 3 秒自动保存，也可手动保存"
         title={draft.id ? "编辑日记" : "新建日记"}
       >
@@ -76,6 +92,7 @@ export default function DiaryScreen() {
           <Field label="标题" onChangeText={(title) => setDraft({ ...draft, title })} value={draft.title} />
           <Field
             label="正文"
+            autoParagraphIndent
             multiline
             onChangeText={(body) => setDraft({ ...draft, body })}
             placeholder="写下今天发生的事……"

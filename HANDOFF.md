@@ -69,3 +69,20 @@
 
 ### 是否建议 commit
 是；建议 message：`feat(mobile): implement sync protocol v1 2.3`。本轮未提交或推送。
+# 仓库治理、数据根目录与移动端基础体验
+
+### 修改文件
+- `docs/CURRENT.md`、README 与开发说明 — 统一当前应用、数据和同步事实来源，并归档历史文档。
+- `diary_v2.0/data_root_config.py`、`data_api.py`、`server.py`、数据管理页 — 安全迁移数据根目录，外置 bootstrap 配置与重启生效。
+- `mobile/` — 修复外部 URI 路由、段首缩进、离开编辑页自动保存、SAF 外置备份和构建标识。
+- `legacy/` — 收纳 Qt Android 工程和冻结的 PySide6 UI 说明。
+
+### 测试结果
+- Python: `D:\\python\\python.exe -m pytest tests/ -v --tb=short`，153 passed。
+- Mobile: `npm run typecheck` 通过；`npm test` 24 passed。
+
+### 风险
+- 桌面目录选择和 Android SAF 需要在目标设备上进行一次手工验证；代码测试未覆盖系统对话框。
+
+### 是否建议 commit
+是，建议 message：`chore: align active apps, storage, mobile startup and legacy structure`

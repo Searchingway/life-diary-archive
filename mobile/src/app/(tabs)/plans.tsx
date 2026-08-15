@@ -116,7 +116,7 @@ export default function PlansScreen() {
         <StatusBanner error={error} text={message} />
         <Panel>
           <Field label="计划名称" onChangeText={(title) => setDraft({ ...draft, title })} value={draft.title} />
-          <Field label="目标" multiline onChangeText={(goal) => updateExtra({ ...extra, goal })} value={extra.goal} />
+          <Field label="目标" autoParagraphIndent multiline onChangeText={(goal) => updateExtra({ ...extra, goal })} value={extra.goal} />
           <Field label="开始日期" onChangeText={(start_date) => updateExtra({ ...extra, start_date })} value={extra.start_date} />
           <Field label="截止日期" onChangeText={(due_date) => updateExtra({ ...extra, due_date })} value={extra.due_date} />
           <Text style={styles.label}>优先级</Text>
@@ -135,7 +135,7 @@ export default function PlansScreen() {
               </Pressable>
             ))}
           </View>
-          <Field label="备注" multiline onChangeText={(notes) => updateExtra({ ...extra, notes })} value={extra.notes} />
+          <Field label="备注" autoParagraphIndent multiline onChangeText={(notes) => updateExtra({ ...extra, notes })} value={extra.notes} />
         </Panel>
         <View style={styles.sectionHeading}>
           <View>
@@ -151,7 +151,7 @@ export default function PlansScreen() {
             </Pressable>
             <Field label="任务名称" onChangeText={(title) => updateExtra({ ...extra, tasks: extra.tasks.map((item) => (item.id === task.id ? { ...item, title } : item)) })} value={task.title} />
             <Field label="任务日期（可选）" onChangeText={(scheduled_date) => updateExtra({ ...extra, tasks: extra.tasks.map((item) => (item.id === task.id ? { ...item, scheduled_date } : item)) })} value={task.scheduled_date} />
-            <Field label="任务备注（可选）" multiline onChangeText={(note) => updateExtra({ ...extra, tasks: extra.tasks.map((item) => (item.id === task.id ? { ...item, note } : item)) })} value={task.note} />
+            <Field label="任务备注（可选）" autoParagraphIndent multiline onChangeText={(note) => updateExtra({ ...extra, tasks: extra.tasks.map((item) => (item.id === task.id ? { ...item, note } : item)) })} value={task.note} />
             <SecondaryButton danger label="删除任务" onPress={() => updateExtra({ ...extra, tasks: extra.tasks.filter((item) => item.id !== task.id) })} />
           </Panel>
         ))}

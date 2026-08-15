@@ -15,7 +15,6 @@ import data_api
 
 from data_api import (
     APP_TITLE,
-    DATA_ROOT,
     FRONTEND_DIST,
     MODULE_BY_KEY,
     add_entry_images,
@@ -23,18 +22,21 @@ from data_api import (
     build_overview,
     classify_entry_images_to_footprint,
     configured_export_dir,
+    data_root_status,
     delete_generic_record,
     ensure_child_path,
     entry_image_path,
     footprint_visit_image_path,
     list_module_records,
     migrate_legacy_data_if_needed,
+    migrate_current_data_root,
     promote_light_plan_to_action,
     read_settings,
     save_footprint_visit,
     save_generic_record,
     save_resource,
     select_and_store_export_directory,
+    select_data_root_directory,
     update_entry_images,
     update_footprint_visit_images,
     unique_output_path,
@@ -68,6 +70,9 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/settings":
             self.send_json({**read_settings(), "export_dir": str(configured_export_dir())})
+            return
+        if parsed.path == "/api/data-root":
+            self.send_json(data_root_status())
             return
         session_match = re.fullmatch(r"/api/sync/sessions/([^/]+)", parsed.path)
         if session_match:
@@ -113,8 +118,22 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
     def _do_POST(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/actions/open-data-root":
-            os.startfile(DATA_ROOT)  # type: ignore[attr-defined]
+            data_api.DATA_ROOT.mkdir(parents=True, exist_ok=True)
+            os.startfile(data_api.DATA_ROOT)  # type: ignore[attr-defined]
             self.send_json({"ok": True})
+            return
+        if parsed.path == "/api/actions/select-data-root":
+            try:
+                self.send_json({"selected_path": str(select_data_root_directory())})
+            except Exception as exc:
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        if parsed.path == "/api/actions/migrate-data-root":
+            try:
+                payload = self.read_json_body()
+                self.send_json(migrate_current_data_root(str(payload.get("destination") or "")))
+            except Exception as exc:
+                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return
         if parsed.path == "/api/actions/select-export-dir":
             try:

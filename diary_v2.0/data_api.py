@@ -27,6 +27,8 @@ if _src not in sys.path:
 
 from life_dairy.exporters import DiaryExportItem
 from life_dairy.models import DiaryEntry, DiaryImage
+from life_dairy.backup_service import create_backup
+from data_root_config import DataRootError, default_bootstrap_path, migrate_data_root, resolve_data_root
 from plan_v2 import migrate_plan_to_v2
 
 
@@ -35,9 +37,10 @@ BASE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BASE_DIR.parent
 FRONTEND_DIST = BASE_DIR / "Untitled" / "dist"
 LEGACY_DATA_ROOT = (REPO_ROOT / "data" / "Diary").resolve()
-DATA_ROOT = Path(os.environ.get("LIFE_DIARY_DATA_ROOT", BASE_DIR / "data" / "Diary")).resolve()
+DEFAULT_DATA_ROOT = (BASE_DIR / "data" / "Diary").resolve()
+BOOTSTRAP_PATH = default_bootstrap_path()
+DATA_ROOT = resolve_data_root(DEFAULT_DATA_ROOT, BOOTSTRAP_PATH)
 MIGRATION_MARKER = DATA_ROOT / ".life_diary_2_migration.json"
-SETTINGS_PATH = DATA_ROOT / "config" / "app_settings.json"
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_IMAGE_BASE64_CHARS = int(MAX_IMAGE_BYTES * 1.4) + 1024
@@ -83,6 +86,18 @@ MODULE_BY_KEY = {module.key: module for module in MODULES}
 
 def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="microseconds")
+
+
+def build_identity() -> dict[str, str]:
+    try:
+        commit = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short=12", "HEAD"],
+            check=True, capture_output=True, text=True, timeout=3,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        commit = "unknown"
+    return {"version": "2.0", "commit": commit or "unknown"}
 
 
 def ensure_child_path(base: Path, *parts: str) -> Path:
@@ -232,9 +247,10 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def read_settings() -> dict[str, Any]:
-    if SETTINGS_PATH.exists():
+    settings_path = DATA_ROOT / "config" / "app_settings.json"
+    if settings_path.exists():
         try:
-            return read_json(SETTINGS_PATH)
+            return read_json(settings_path)
         except (OSError, json.JSONDecodeError):
             return {}
     return {}
@@ -242,8 +258,26 @@ def read_settings() -> dict[str, Any]:
 
 def write_settings(data: dict[str, Any]) -> dict[str, Any]:
     settings = {**read_settings(), **data, "updated_at": now_iso()}
-    write_json(SETTINGS_PATH, settings)
+    write_json(DATA_ROOT / "config" / "app_settings.json", settings)
     return settings
+
+
+def data_root_status() -> dict[str, str]:
+    return {
+        "data_root": str(DATA_ROOT),
+        "default_data_root": str(DEFAULT_DATA_ROOT),
+        "bootstrap_path": str(BOOTSTRAP_PATH),
+        "source": "environment" if os.environ.get("LIFE_DIARY_DATA_ROOT", "").strip() else "bootstrap" if BOOTSTRAP_PATH.exists() else "default",
+    }
+
+
+def migrate_current_data_root(destination: str) -> dict[str, str]:
+    target = Path(destination).expanduser()
+    if not str(destination).strip():
+        raise DataRootError("请选择新的数据目录")
+    safety_backup = create_backup(DATA_ROOT, DATA_ROOT.parent / "data_root_backups", filename_prefix="BeforeDataRootMigration")
+    migrated = migrate_data_root(DATA_ROOT, target, BOOTSTRAP_PATH)
+    return {"data_root": str(migrated), "safety_backup": str(safety_backup), "restart_required": "true"}
 
 
 def default_export_dir() -> Path:
@@ -383,6 +417,7 @@ def build_overview() -> dict[str, Any]:
         "dashboard_stats": build_dashboard_stats(),
         "modules": modules,
         "recent": recent[:20],
+        "build": build_identity(),
     }
 
 
@@ -664,6 +699,30 @@ def select_and_store_export_directory() -> dict[str, str]:
     output_dir = select_export_directory()
     write_settings({"export_dir": str(output_dir)})
     return {"export_dir": str(output_dir)}
+
+
+def select_data_root_directory() -> Path:
+    script = r"""
+Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = '选择新的日记数据目录（该目录必须不存在）'
+$dialog.ShowNewFolderButton = $true
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    Write-Output $dialog.SelectedPath
+}
+"""
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        check=False, capture_output=True, text=True, timeout=300,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    selected = (result.stdout or "").strip().splitlines()
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "选择数据目录失败").strip())
+    if not selected:
+        raise ValueError("已取消选择数据目录")
+    return Path(selected[-1]).expanduser().resolve()
 
 
 def safe_export_name(raw: str) -> str:

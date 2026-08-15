@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { Activity, AlertTriangle, Database, Download, FileCheck, FolderOpen, GitMerge, Upload } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { AppSettings, Overview, SyncConflict, SyncSession, commitSyncImport, exportAllModules, exportDesktopCanonicalZip, getOverview, getSettings, getSyncSession, importMobileSnapshot, openDataRoot, resolveEntrySyncConflict, resolveGenericSyncConflict, selectExportDirectory, selectMobileSnapshotZip } from "../lib/api";
+import { AppSettings, DataRootStatus, Overview, SyncConflict, SyncSession, commitSyncImport, exportAllModules, exportDesktopCanonicalZip, getDataRootStatus, getOverview, getSettings, getSyncSession, importMobileSnapshot, migrateDataRoot, openDataRoot, resolveEntrySyncConflict, resolveGenericSyncConflict, selectDataRootDirectory, selectExportDirectory, selectMobileSnapshotZip } from "../lib/api";
 
 export function DataManagement() {
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [dataRoot, setDataRoot] = useState<DataRootStatus | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [exporting, setExporting] = useState(false);
   const [syncSession, setSyncSession] = useState<SyncSession | null>(null);
@@ -22,6 +23,7 @@ export function DataManagement() {
       })
       .catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
     getSettings().then(setSettings).catch(() => undefined);
+    getDataRootStatus().then(setDataRoot).catch(() => undefined);
   }, []);
 
   async function handleOpenDataRoot() {
@@ -29,6 +31,16 @@ export function DataManagement() {
       await openDataRoot();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "打开数据目录失败");
+    }
+  }
+
+  async function handleMigrateDataRoot() {
+    try {
+      const selected = await selectDataRootDirectory();
+      const result = await migrateDataRoot(selected.selected_path);
+      setMessage(`已复制到新目录；安全备份：${result.safety_backup}。请重启应用后生效，原目录将保留。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "迁移数据目录失败");
     }
   }
 
@@ -156,6 +168,7 @@ export function DataManagement() {
         <div>
           <h1 className="text-3xl font-semibold">数据管理</h1>
           <p className="text-muted-foreground mt-2">2.0 使用独立数据目录，首次启动自动从旧版迁移。</p>
+          <p className="text-xs text-muted-foreground mt-1">桌面版 {overview?.build.version ?? "dev"} · 提交 {overview?.build.commit ?? "unknown"}</p>
         </div>
 
         <Card>
@@ -210,13 +223,13 @@ export function DataManagement() {
               <Database className="size-5" />
               数据位置
             </CardTitle>
-            <CardDescription>新版数据与旧版数据分开保存</CardDescription>
+            <CardDescription>数据根目录可迁移；切换在重启后生效，旧目录不会被删除。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
               <p className="text-sm text-muted-foreground mb-2">2.0 数据目录</p>
               <div className="p-4 bg-secondary rounded-lg font-mono text-sm break-all">
-                {overview?.data_root || "diary_v2.0/data/Diary"}
+                {dataRoot?.data_root || overview?.data_root || "diary_v2.0/data/Diary"}
               </div>
             </div>
             <div>
@@ -229,6 +242,11 @@ export function DataManagement() {
               <FolderOpen className="size-4" />
               打开 2.0 数据文件夹
             </Button>
+            <Button variant="outline" onClick={handleMigrateDataRoot}>
+              <FolderOpen className="size-4" />
+              选择新目录并迁移当前数据
+            </Button>
+            <p className="text-xs text-muted-foreground">当前来源：{dataRoot?.source ?? "default"}；引导配置：{dataRoot?.bootstrap_path ?? "系统本地配置"}</p>
           </CardContent>
         </Card>
 

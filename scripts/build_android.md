@@ -1,6 +1,6 @@
 # LifeDiary Mobile 1.6 Android Release Build
 
-This procedure builds, signs, installs, and launches the Qt Android arm64-v8a release APK for `android/LifeDiaryMobile`.
+This historical procedure builds, signs, installs, and launches the Qt Android arm64-v8a release APK for `legacy/mobile-qt/LifeDiaryMobile`. The current mobile app is `mobile/`; see `docs/CURRENT.md`.
 
 ## Required Environment Variables
 
@@ -22,7 +22,7 @@ The batch file finds `ninja.exe` from `PATH` or from the directory containing `C
 ## Build, Sign, Install, and Launch
 
 ```powershell
-cd android/LifeDiaryMobile
+cd legacy/mobile-qt/LifeDiaryMobile
 .\build_android_arm64.bat
 ```
 
@@ -38,7 +38,7 @@ adb shell monkey -p com.localfirst.lifediary 1
 The deliverable is:
 
 ```text
-android/LifeDiaryMobile/build-android-arm64-release/android-build/build/outputs/apk/release/LifeDiaryMobile-1.6.1-arm64-v8a-signed.apk
+legacy/mobile-qt/LifeDiaryMobile/build-android-arm64-release/android-build/build/outputs/apk/release/LifeDiaryMobile-1.6.1-arm64-v8a-signed.apk
 ```
 
 Version values are `versionName 1.6.1` and `versionCode 3` in both CMake and the Android manifest.

@@ -86,12 +86,14 @@ describe("Sync Protocol V1 mobile compatibility", () => {
     expect(() => validateArchivePaths(["manifest.json", "manifest.json"])).toThrow(/duplicate/i);
   });
 
-  it("routes one supported Android ZIP URI to Data and suppresses a duplicate intent", () => {
+  it("routes only a supported Android ZIP URI to Data and suppresses a duplicate intent", () => {
     const uri = "content://com.tencent.mm.external.fileprovider/cache/LifeDiary-Desktop-Canonical.zip";
+    expect(normalizeIncomingSystemPath("/")).toBe("/");
+    expect(normalizeIncomingSystemPath("/diary?draft=entry-1")).toBe("/diary?draft=entry-1");
     expect(normalizeIncomingSystemPath(uri)).toBe(`/data?incoming=${encodeURIComponent(uri)}`);
     expect(consumeIncomingUri(uri, 1000)).toBe(true);
     expect(consumeIncomingUri(uri, 1100)).toBe(false);
     expect(consumeIncomingUri(uri, 20_000)).toBe(true);
-    expect(normalizeIncomingSystemPath("content://provider/not-a-zip.txt")).toBe("/data");
+    expect(normalizeIncomingSystemPath("content://provider/not-a-zip.txt")).toBe("/");
   });
 });

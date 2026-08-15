@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import { useRef, useState, type PropsWithChildren } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -10,6 +10,7 @@ import {
 } from "react-native";
 
 import { colors, spacing } from "@/theme";
+import { applyParagraphIndent, type TextSelection } from "@/utils/paragraphIndent";
 
 export function PrimaryButton({
   label,
@@ -36,31 +37,70 @@ export function SecondaryButton({
   label,
   onPress,
   danger,
+  disabled,
 }: {
   label: string;
   onPress: () => void;
   danger?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
+      disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.secondary, pressed && styles.pressed, disabled && styles.disabled]}
     >
       <Text style={[styles.secondaryText, danger && { color: colors.danger }]}>{label}</Text>
     </Pressable>
   );
 }
 
-export function Field({ label, multiline, style, ...props }: TextInputProps & { label: string; style?: ViewStyle }) {
+export function Field({
+  label,
+  multiline,
+  style,
+  autoParagraphIndent = false,
+  onChangeText,
+  onSelectionChange,
+  selection: inputSelection,
+  value,
+  ...props
+}: TextInputProps & { label: string; style?: ViewStyle; autoParagraphIndent?: boolean }) {
+  const [selection, setSelection] = useState<TextSelection>({ start: 0, end: 0 });
+  const selectionRef = useRef(selection);
+
+  function updateSelection(next: TextSelection) {
+    selectionRef.current = next;
+    setSelection(next);
+  }
+
+  function handleChangeText(next: string) {
+    if (!autoParagraphIndent || !multiline) {
+      onChangeText?.(next);
+      return;
+    }
+    const result = applyParagraphIndent(value ?? "", next, selectionRef.current);
+    updateSelection(result.selection);
+    onChangeText?.(result.value);
+  }
+
   return (
     <View style={[styles.field, style]}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
         multiline={multiline}
+        onChangeText={handleChangeText}
+        onSelectionChange={(event) => {
+          const next = event.nativeEvent.selection;
+          if (autoParagraphIndent && multiline) updateSelection(next);
+          onSelectionChange?.(event);
+        }}
         placeholderTextColor="#929AA1"
+        selection={autoParagraphIndent && multiline ? selection : inputSelection}
         style={[styles.input, multiline && styles.multiline]}
         textAlignVertical={multiline ? "top" : "center"}
+        value={value}
         {...props}
       />
     </View>

@@ -140,3 +140,5 @@
 - [ ] Run full mobile tests, typecheck, Expo export, Android release build, and existing repo regression tests.
 - [ ] Copy the signed APK to `C:\Users\hp\Desktop\人生档案-Expo-2.1.0-release-signed.apk`.
 - [ ] Confirm generated native folders, APKs, keystore, and passwords are not tracked.
+> ARCHIVED / HISTORICAL DOCUMENT
+> 不代表当前实现，请阅读 docs/CURRENT.md
