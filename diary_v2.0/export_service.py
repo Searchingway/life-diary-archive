@@ -109,13 +109,21 @@ def append_footprint_record_to_docx(document: Any, record: dict[str, Any], inclu
 
 def zip_raw_data(target_dir: Path) -> Path:
     zip_path = unique_output_path(target_dir / "2.0原始数据.zip")
+    data_root = DATA_ROOT.resolve()
     exports_root = (DATA_ROOT / "exports").resolve()
+    output_root = target_dir.resolve()
+    nested_output = output_root != data_root and output_root.is_relative_to(data_root)
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in DATA_ROOT.rglob("*"):
             if not path.is_file():
                 continue
             resolved = path.resolve()
-            if str(resolved).startswith(str(exports_root)):
+            if (
+                resolved == zip_path.resolve()
+                or not resolved.is_relative_to(data_root)
+                or resolved.is_relative_to(exports_root)
+                or (nested_output and resolved.is_relative_to(output_root))
+            ):
                 continue
             archive.write(path, path.relative_to(DATA_ROOT))
     return zip_path

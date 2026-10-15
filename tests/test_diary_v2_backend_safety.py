@@ -36,6 +36,24 @@ class DiaryV2BackendSafetyTests(unittest.TestCase):
             self.assertNotIn(character, result)
         self.assertTrue(result)
 
+    def test_resource_optional_text_can_be_cleared_without_losing_other_fields(self) -> None:
+        original = data_api.save_resource({
+            "title": "学习机会", "body": "描述",
+            "extra": {"overall_judgement": "值得", "subjective_feeling": "期待", "notes": "备注", "custom": "保留"},
+        })
+        saved = data_api.save_resource({
+            "id": original["id"], "title": "学习机会", "body": "描述",
+            "extra": {"overall_judgement": "", "subjective_feeling": "", "notes": ""},
+        })
+        for field in ("overall_judgement", "subjective_feeling", "notes"):
+            self.assertEqual(saved["extra"][field], "")
+        self.assertEqual(saved["extra"]["custom"], "保留")
+
+    def test_resource_omitted_optional_text_is_preserved(self) -> None:
+        original = data_api.save_resource({"title": "机会", "extra": {"notes": "保留备注"}})
+        saved = data_api.save_resource({"id": original["id"], "title": "更新标题"})
+        self.assertEqual(saved["extra"]["notes"], "保留备注")
+
     def test_unique_output_path_does_not_overwrite_existing_file(self) -> None:
         target = self.root / "export.docx"
         target.write_text("existing", encoding="utf-8")
