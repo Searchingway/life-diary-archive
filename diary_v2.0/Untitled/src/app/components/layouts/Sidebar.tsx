@@ -79,16 +79,16 @@ const navGroups: NavGroup[] = [
 
 export function Sidebar() {
   return (
-    <aside className="w-64 border-r bg-card flex flex-col">
-      <div className="p-6 border-b">
-        <h1 className="text-xl font-semibold">人生档案 Diary</h1>
-        <p className="text-xs text-muted-foreground mt-1">本地优先个人档案</p>
+    <aside className="w-16 shrink-0 border-r bg-card flex flex-col md:w-52 lg:w-60">
+      <div className="p-4 md:p-5 border-b">
+        <h1 className="text-xl font-semibold"><span className="md:hidden" aria-label="人生档案 Diary"><BookOpen className="size-6" /></span><span className="hidden md:inline">人生档案 Diary</span></h1>
+        <p className="hidden md:block text-xs text-muted-foreground mt-1">本地优先个人档案</p>
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-4 space-y-6">
+      <nav aria-label="主要导航" className="flex-1 overflow-y-auto p-2 md:p-4 space-y-6">
         {navGroups.map((group) => (
           <div key={group.title}>
-            <h2 className="text-xs font-semibold text-muted-foreground uppercase mb-2 px-3">
+            <h2 className="hidden md:block text-xs font-semibold text-muted-foreground uppercase mb-2 px-3">
               {group.title}
             </h2>
             <div className="space-y-1">
@@ -96,9 +96,11 @@ export function Sidebar() {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  aria-label={item.label}
+                  title={item.label}
                   className={({ isActive }) =>
                     cn(
-                      "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+                      "flex items-center justify-center md:justify-start gap-3 px-3 py-2 rounded-md text-sm transition-colors",
                       isActive
                         ? "bg-primary text-primary-foreground"
                         : "hover:bg-accent text-muted-foreground hover:text-foreground"
@@ -106,7 +108,7 @@ export function Sidebar() {
                   }
                 >
                   <item.icon className="size-4 shrink-0" />
-                  <span>{item.label}</span>
+                  <span className="hidden md:inline">{item.label}</span>
                 </NavLink>
               ))}
             </div>
@@ -114,10 +116,10 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="p-4 border-t text-xs text-muted-foreground">
+      <div className="hidden md:block p-4 border-t text-xs text-muted-foreground">
         <div className="flex items-center justify-between">
           <span>本地数据</span>
-          <span className="text-green-600">正常</span>
+          <span>保存在本机</span>
         </div>
       </div>
     </aside>

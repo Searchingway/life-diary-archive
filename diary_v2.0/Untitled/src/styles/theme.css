@@ -126,6 +126,7 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
   }
 
   /**

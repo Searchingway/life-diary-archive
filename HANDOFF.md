@@ -111,3 +111,23 @@
 
 ### 是否建议 commit
 是：`fix(diary): protect unsaved drafts during search and navigation`。
+
+
+## 2026-10-15 工作台与自适应导航
+
+### 修改文件
+- `diary_v2.0/Untitled/src/app/pages/Dashboard.tsx` — 聚焦快速记录、本月/今年统计、今日任务、最近动态与模块入口；增加读取失败重试、刷新及刷新失败保留统计，最近日记可直接定位。
+- `diary_v2.0/Untitled/src/app/components/layouts/MainLayout.tsx`、`Sidebar.tsx` — 主区允许收缩，窄窗口显示带名称和提示的图标导航；去掉未经检测的“正常”状态。
+- `diary_v2.0/Untitled/index.html`、`src/styles/theme.css` — 中文标题、语言、说明和本机中文字体，移除生成模板的产品描述。
+
+### 测试结果
+- `npm run build`：通过。
+- 隔离数据浏览器验证：初次失败不展示虚假的零统计；重试恢复；本月/今年切换；刷新失败保留已加载数据；最近日记准确打开指定 id。
+- 1440、800、390 像素宽度无页面水平溢出；检查了桌面和窄屏截图。人为注入的 HTTP 503 在浏览器控制台产生预期网络错误。
+
+### 风险
+- 最近动态中的非日记条目前往对应模块，链接名称明确说明目的；未给这些页面添加新的编辑或写入行为。
+- 本轮浏览器使用 `.tmp_testdata/` 演示数据，不代表安卓真机或 Windows 桌面壳验收。
+
+### 是否建议 commit
+是：`feat(desktop): refresh dashboard and adapt navigation to narrow windows`。
