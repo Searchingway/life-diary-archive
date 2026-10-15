@@ -13,6 +13,9 @@
 | `/api/overview` | GET | — | `{ data_root, modules[], recent[], dashboard_stats{} }` | 总览 |
 | `/api/settings` | GET | — | `{ export_dir, ...app_settings }` | 读取设置 |
 | `/api/settings` | POST | `{ key: value }` | `{ ...updated_settings }` | 保存设置 |
+| `/api/ai/settings` | GET | — | `{ enabled, base_url, model, timeout_seconds, has_api_key }` | 只返回密钥是否存在，不返回完整密钥 |
+| `/api/ai/settings` | POST | `{ enabled?, base_url?, model?, timeout_seconds?, api_key? }` | 同 GET | 显式保存到本机，原子写入 |
+| `/api/ai/test` | POST | 同 AI settings POST | `{ ok, model, message }` | 用当前草稿测试，不保存 |
 | `/api/modules/<key>` | GET | query: `?q=keyword` | `[{ id, title, subtitle, body, date, updated_at, status, type, extra }]` | 列表 |
 | `/api/modules/<key>` | PUT | `{ id?, title, body, date, type, status, extra }` | `{ ...saved_record }` | 保存 |
 | `/api/modules/<key>/<id>` | DELETE | — | `{ ok: true }` | 删除 |
@@ -64,6 +67,18 @@ interface SavePayload {
 5. 返回 `record_from_directory()` 作为响应
 
 ## 数据约束
+
+### AI 配置约束
+
+- 配置位于当前数据根目录的 `config/ai_settings.json`，沿用现有 AISettings 字段和格式。
+- 不传 `api_key` 保留原密钥；显式 `api_key: ""` 清除密钥。启用或测试时须有有效的非空密钥。
+- 已保存密钥绑定服务的 scheme/hostname/port，更换主机时必须显式输入新密钥，不可自动向新主机转发原密钥。
+- 超时须为 5–180 秒的整数；Base URL 须为 HTTP/HTTPS，不能包含用户名、密码、查询参数或 fragment；模型名不得为空。
+- 所有成功响应均不含完整密钥；AI 路由的错误响应为 UTF-8 JSON `{ error: string }`，验证失败 HTTP 400、连接失败 HTTP 502、配置读写失败 HTTP 500。
+- 不返回或记录供应商的原始异常；连接测试仅发送固定测试提示，且网络等待不持有全局数据变更锁。
+- 测试成功/失败均不写配置；只有保存请求写入，未传入的配置扩展字段保留。
+- 连接测试不是 AI 内容应用流程，不改变日记、计划或其他记录。
+- AI 路由只接受当前本机端口的 127.0.0.1/localhost Host；带 Origin 时须与当前 HTTP origin 一致。POST 强制 application/json；异常来源/Host 返回 HTTP 403，非 JSON 返回 HTTP 415。无 Origin 的原生 JSON 客户端仍可使用。
 
 | 约束 | 说明 |
 |------|------|

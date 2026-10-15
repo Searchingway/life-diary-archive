@@ -65,6 +65,28 @@ export interface AppSettings {
   updated_at?: string;
 }
 
+export interface AIConfiguration {
+  enabled: boolean;
+  base_url: string;
+  model: string;
+  timeout_seconds: number;
+  has_api_key: boolean;
+}
+
+export type AIConfigurationDraft = Omit<AIConfiguration, "has_api_key"> & { api_key?: string };
+
+export function getAIConfiguration(): Promise<AIConfiguration> {
+  return request<AIConfiguration>("/api/ai/settings");
+}
+
+export function saveAIConfiguration(draft: AIConfigurationDraft): Promise<AIConfiguration> {
+  return request<AIConfiguration>("/api/ai/settings", { method: "POST", body: JSON.stringify(draft) });
+}
+
+export function testAIConfiguration(draft: AIConfigurationDraft): Promise<{ ok: boolean; model: string; message: string }> {
+  return request("/api/ai/test", { method: "POST", body: JSON.stringify(draft) });
+}
+
 export interface FootprintVisit {
   id: string;
   date: string;
@@ -129,7 +151,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (!response.ok) {
-    const message = await response.text();
+    let message = await response.text();
+    try {
+      const detail = JSON.parse(message);
+      if (typeof detail.error === "string") message = detail.error;
+    } catch { /* Older endpoints may return plain text or HTML. */ }
     throw new Error(message || response.statusText);
   }
   return response.json();

@@ -131,3 +131,27 @@
 
 ### 是否建议 commit
 是：`feat(desktop): refresh dashboard and adapt navigation to narrow windows`。
+
+
+## 2026-10-15 AI 设置接通真实本地配置与连接测试
+
+### 修改文件
+- `diary_v2.0/ai_config_api.py` — 新增配置读取、验证、原子保存和草稿连接测试服务；完整密钥不返回，供应商异常不原样返回或记录，连接等待不占用日记保存锁。
+- `diary_v2.0/server.py` — 新增 GET/POST `/api/ai/settings` 与 POST `/api/ai/test`，错误使用 UTF-8 JSON。
+- `diary_v2.0/Untitled/src/app/pages/AISettings.tsx`、`lib/api.ts` — 替换固定成功的演示；支持保存、取消、保留/替换/显式清除密钥、密码显示切换、错误重试和未保存导航保护。
+- `pyproject.toml` — 根目录安装依赖补齐已有 v2 requirements 中的 `openai`，供真实连接测试使用。
+- `tests/test_v2_ai_settings.py`、`openspec/specs/data-contract/spec.md`、`docs/lifecycle/PAGE_LIFECYCLES.md`、`README.md` — 回归、接口契约、交互状态及使用说明。
+
+### 测试结果
+- 完整 Python：161 passed，13 subtests passed；AI 专项包含配置写入失败、字段验证、密钥不泄露、测试不写配置、网络不阻塞日记及真实 HTTP 路由。
+- 独立审查发现跨源转发密钥风险，先用失败用例复现后修复：AI 路由验证本机 Host/同源 Origin/JSON 类型，更换服务主机须重新输入密钥；复审独立验证 8 场景无剩余高/中风险。修复后 AI 专项 9 passed，15 subtests passed。
+- `npm run build`：通过。
+- 隔离浏览器 + 真实 OpenAI SDK + 本地模拟供应商：成功响应、401 失败、测试不保存、保存后隐藏密钥、取消恢复、导航拦截、显式清除密钥并禁用 AI 均通过。
+
+### 风险
+- 未使用用户真实密钥，未调用付费供应商，真实远程连接待用户验证。
+- 配置沿用既有本地 JSON；旧版后端和用户数据格式未改变，原始备份仍可能包含配置，分享前应检查。
+- 本批交付的是 AI 设置与连接能力，其他业务页面的 AI 草稿生成功能不属于本批验收。
+
+### 是否建议 commit
+是：`feat(ai): connect desktop settings and non-persisting connection tests`。

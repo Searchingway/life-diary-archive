@@ -575,7 +575,7 @@ Idle → RunningCheck → CheckComplete → Idle
 
 ### Page Goal
 
-配置 DeepSeek API 参数。不是页面，是弹窗。
+通过 `/ai-settings` 页面配置兼容 DeepSeek / OpenAI 的 API 参数。
 
 ### Applicable Common Lifecycles
 
@@ -605,6 +605,8 @@ Idle → Testing → TestSuccess (显示模型返回)
 
 - 测试连接**不等于保存**
 - 测试失败不能覆盖已保存配置
+- 测试使用当前草稿参数，未输入新密钥时复用已保存密钥；仅发送固定连接提示，不发送日记内容
+- 测试结果、错误消息和日志不得包含完整密钥；失败不能固定显示成功
 
 #### Save Settings Lifecycle
 
@@ -617,13 +619,14 @@ SettingsDraft → SaveRequest → Saving → Saved
 ### Forbidden Transitions
 
 - API Key 输入框默认密码模式（不可见）
+- 页面初次加载不回填完整已保存密钥，以“已保存密钥，留空保留”提示；清除密钥需要显式点击并保存
 - 测试连接不能改变已保存的配置
 - 日志不得打印完整 API Key
 
 ### Implementation Notes
 
-- 弹窗打开前从后端加载当前设置
-- 取消关闭弹窗不保存任何修改
+- 页面打开时从后端加载当前设置，加载失败显示重试入口
+- 取消修改恢复最近已保存的配置；未保存时切换页面提供保存、放弃、继续编辑
 - 保存后通知后端更新配置
 
 ---

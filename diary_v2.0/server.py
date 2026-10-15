@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 import data_api
+import ai_config_api
 
 from data_api import (
     APP_TITLE,
@@ -63,6 +64,14 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/ai/settings":
+            if not self.check_ai_request():
+                return
+            try:
+                self.send_json(ai_config_api.read_configuration())
+            except Exception:
+                self.send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, "无法读取 AI 设置")
+            return
         if parsed.path == "/api/overview":
             self.send_json(build_overview())
             return
@@ -107,11 +116,32 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         self.serve_frontend(parsed.path)
 
     def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        if path in {"/api/ai/settings", "/api/ai/test"} and not self.check_ai_request(require_json=True):
+            return
+        if path == "/api/ai/test":
+            try:
+                self.send_json(ai_config_api.test_configuration(self.read_json_body()))
+            except ValueError:
+                self.send_json_error(HTTPStatus.BAD_REQUEST, "请检查 API Key、Base URL、模型名称和超时时间（5–180 秒）")
+            except RuntimeError as error:
+                self.send_json_error(HTTPStatus.BAD_GATEWAY, str(error))
+            except Exception:
+                self.send_json_error(HTTPStatus.BAD_GATEWAY, "AI 连接测试失败")
+            return
         with data_api.data_mutation_lock():
             self._do_POST()
 
     def _do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/ai/settings":
+            try:
+                self.send_json(ai_config_api.save_configuration(self.read_json_body()))
+            except ValueError:
+                self.send_json_error(HTTPStatus.BAD_REQUEST, "请检查 API Key、Base URL、模型名称和超时时间（5–180 秒）")
+            except Exception:
+                self.send_json_error(HTTPStatus.INTERNAL_SERVER_ERROR, "无法保存 AI 设置，请检查本地目录是否可写")
+            return
         if parsed.path == "/api/actions/open-data-root":
             os.startfile(DATA_ROOT)  # type: ignore[attr-defined]
             self.send_json({"ok": True})
@@ -332,6 +362,26 @@ class LifeDiaryHandler(BaseHTTPRequestHandler):
         if not isinstance(value, dict):
             raise ValueError("request body must be an object")
         return value
+
+    def check_ai_request(self, *, require_json: bool = False) -> bool:
+        port = self.server.server_port
+        host = self.headers.get("Host", "").lower()
+        origin = self.headers.get("Origin")
+        if host not in {f"127.0.0.1:{port}", f"localhost:{port}"} or (origin is not None and origin != f"http://{host}"):
+            self.send_json_error(HTTPStatus.FORBIDDEN, "AI 设置只接受本机应用的同源请求")
+            return False
+        if require_json and self.headers.get_content_type() != "application/json":
+            self.send_json_error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "AI 请求须使用 application/json")
+            return False
+        return True
+
+    def send_json_error(self, status: HTTPStatus, message: str) -> None:
+        data = json.dumps({"error": message}, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def send_json(self, payload: Any) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
