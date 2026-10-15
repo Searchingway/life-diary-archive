@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useBlocker } from "react-router";
 import { Download, Plus, Save, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { ImageManager } from "../components/records/ImageManager";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import {
   EntryImage,
   RecordItem,
@@ -87,39 +89,61 @@ export function Diary() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [classifyOpen, setClassifyOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [pendingTransition, setPendingTransition] = useState<(() => Promise<void> | void) | null>(null);
+  const [transitionBusy, setTransitionBusy] = useState(false);
+  const [transitionError, setTransitionError] = useState("");
   const selectedRef = useRef<RecordItem | null>(null);
   const dirtyRef = useRef(false);
   const editRevisionRef = useRef(0);
   const autoSaveTimerRef = useRef<number | null>(null);
   const switchingRef = useRef(false);
   const draftEntryIdRef = useRef("");
+  const loadRevisionRef = useRef(0);
   const saveCoordinatorRef = useRef<SaveCoordinator | null>(null);
   if (!saveCoordinatorRef.current) {
     saveCoordinatorRef.current = new SaveCoordinator(setSaving);
   }
   selectedRef.current = selected;
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    (dirtyRef.current || Boolean(saveCoordinatorRef.current?.hasPendingSaves)) &&
+    (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search),
+  );
+  const transitionOpen = Boolean(pendingTransition) || blocker.state === "blocked";
 
   const images = useMemo(() => imagesOf(selected), [selected]);
   const wordCount = selected?.body?.length ?? 0;
 
   async function load(keyword = "") {
-    const data = sortDiaryRecords(await listRecords("entries", keyword));
-    setRecords(data);
-    setSelected((current) => {
-      const next = current?.id ? data.find((item) => item.id === current.id) ?? data[0] ?? null : data[0] ?? null;
-      selectedRef.current = next;
-      return next;
-    });
-    dirtyRef.current = false;
-    setDirty(false);
-    setMessage(`已读取 ${data.length} 篇日记`);
+    const revision = ++loadRevisionRef.current;
+    setLoading(true);
+    try {
+      const data = sortDiaryRecords(await listRecords("entries", keyword));
+      if (revision !== loadRevisionRef.current) return;
+      setRecords(data);
+      if (!dirtyRef.current && !saveCoordinatorRef.current?.hasPendingSaves) {
+        const current = selectedRef.current;
+        const requestedId = new URLSearchParams(window.location.search).get("id");
+        const next = data.find((item) => item.id === (current?.id || requestedId)) ?? data[0] ?? null;
+        selectedRef.current = next;
+        setSelected(next);
+        draftEntryIdRef.current = "";
+      }
+      setMessage(data.length ? `已读取 ${data.length} 篇日记` : keyword ? "没有匹配的日记，试试其他关键词" : "还没有日记，点击新建开始记录");
+    } catch (error) {
+      if (revision === loadRevisionRef.current) setMessage(error instanceof Error ? error.message : "读取失败，请重试");
+    } finally {
+      if (revision === loadRevisionRef.current) setLoading(false);
+    }
   }
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("new")) {
+      let active = true;
       listRecords("entries")
         .then((data) => {
+          if (!active) return;
           setRecords(sortDiaryRecords(data));
           const draft = newDiary();
           selectedRef.current = draft;
@@ -128,13 +152,16 @@ export function Diary() {
           setDirty(false);
           setMessage("已创建日记草稿");
         })
-        .catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
-      return;
+        .catch((error) => { if (active) setMessage(error instanceof Error ? error.message : "读取失败"); })
+        .finally(() => { if (active) setLoading(false); });
+      return () => { active = false; };
     }
-    load("").catch((error) => setMessage(error instanceof Error ? error.message : "读取失败"));
+    void load("");
+    return () => { loadRevisionRef.current += 1; };
   }, []);
 
   function patch(patchValue: Partial<RecordItem>) {
+    if (switchingRef.current) return;
     const current = selectedRef.current;
     if (!current) return;
     const next = { ...current, ...patchValue };
@@ -206,35 +233,69 @@ export function Diary() {
     });
   }
 
-  async function selectRecordSafely(record: RecordItem) {
-    if (switchingRef.current || selectedRef.current?.id === record.id) return;
+  function requestTransition(action: () => Promise<void> | void) {
+    if (switchingRef.current || transitionOpen) return;
+    clearAutoSaveTimer();
+    if (dirtyRef.current || saveCoordinatorRef.current?.hasPendingSaves) {
+      setTransitionError("");
+      setPendingTransition(() => action);
+    } else {
+      void action();
+    }
+  }
+
+  function cancelTransition() {
+    if (switchingRef.current) return;
+    setPendingTransition(null);
+    setTransitionError("");
+    if (blocker.state === "blocked") blocker.reset();
+  }
+
+  async function completeTransition(save: boolean) {
+    if (switchingRef.current) return;
     switchingRef.current = true;
+    setTransitionBusy(true);
     clearAutoSaveTimer();
     try {
-      await saveCurrent("已自动保存", true, true);
-    } catch {
-      return;
+      if (save) await saveCurrent("已保存", true, true);
+      else await saveCoordinatorRef.current!.waitForIdle();
+      editRevisionRef.current += 1;
+      dirtyRef.current = false;
+      setDirty(false);
+      setPendingTransition(null);
+      setTransitionError("");
+      if (blocker.state === "blocked") blocker.proceed();
+      else await pendingTransition?.();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "保存失败";
+      setTransitionError(`${detail}。草稿仍保留，请重试或取消切换。`);
+      setMessage("保存失败，草稿仍保留");
     } finally {
       switchingRef.current = false;
+      setTransitionBusy(false);
     }
+  }
+
+  function selectRecordSafely(record: RecordItem) {
+    if (selectedRef.current?.id === record.id) return;
+    requestTransition(() => selectRecord(record));
+  }
+
+  function selectRecord(record: RecordItem) {
     editRevisionRef.current += 1;
     dirtyRef.current = false;
     setDirty(false);
     selectedRef.current = record;
+    draftEntryIdRef.current = "";
     setSelected(record);
+    setMessage("已切换日记");
   }
 
-  async function createNewDiarySafely() {
-    if (switchingRef.current) return;
-    switchingRef.current = true;
-    clearAutoSaveTimer();
-    try {
-      await saveCurrent("已自动保存", true, true);
-    } catch {
-      return;
-    } finally {
-      switchingRef.current = false;
-    }
+  function createNewDiarySafely() {
+    requestTransition(createNewDiary);
+  }
+
+  function createNewDiary() {
     const draft = newDiary();
     draftEntryIdRef.current = "";
     editRevisionRef.current += 1;
@@ -247,13 +308,13 @@ export function Diary() {
 
   useEffect(() => {
     clearAutoSaveTimer();
-    if (!selected || !dirty) return;
+    if (!selected || !dirty || transitionOpen) return;
     autoSaveTimerRef.current = window.setTimeout(() => {
       autoSaveTimerRef.current = null;
       void saveCurrent();
     }, 2800);
     return clearAutoSaveTimer;
-  }, [selected?.id, selected?.title, selected?.body, selected?.date, dirty]);
+  }, [selected?.id, selected?.title, selected?.body, selected?.date, dirty, transitionOpen]);
 
   useEffect(() => {
     const protectUnsavedChanges = (event: BeforeUnloadEvent) => {
@@ -327,7 +388,7 @@ export function Diary() {
         <div className="p-4 border-b space-y-3">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold flex-1">日记</h2>
-            <Button size="sm" onClick={createNewDiarySafely}>
+            <Button size="sm" onClick={createNewDiarySafely} disabled={loading || transitionBusy}>
               <Plus className="size-4" />
               新建
             </Button>
@@ -339,15 +400,24 @@ export function Diary() {
               className="pl-9"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && load(query)}
+              aria-label="搜索日记"
+              disabled={transitionBusy}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  requestTransition(() => load(query));
+                }
+              }}
             />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
+          {!records.length && <p className="p-4 text-sm text-muted-foreground">{loading ? "正在读取日记…" : message}</p>}
           {records.map((record) => (
             <button
               key={record.id}
               onClick={() => selectRecordSafely(record)}
+              disabled={transitionBusy}
               className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
                 selected?.id === record.id ? "bg-primary text-primary-foreground" : "hover:bg-accent"
               }`}
@@ -369,17 +439,18 @@ export function Diary() {
                   placeholder="日记标题"
                   className="text-xl font-semibold border-0 px-0 focus-visible:ring-0"
                   value={selected.title}
+                  disabled={transitionBusy}
                   onChange={(event) => patch({ title: event.target.value })}
                 />
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => saveCurrent("已手动保存", true)} disabled={saving}>
+                  <Button variant="outline" size="sm" onClick={() => saveCurrent("已手动保存", true)} disabled={saving || transitionBusy}>
                     <Save className="size-4" />
                     保存
                   </Button>
                 </div>
               </div>
               <div className="flex items-center gap-4 text-sm">
-                <Input className="w-40" value={selected.date || ""} onChange={(event) => patch({ date: event.target.value })} />
+                <Input type="date" aria-label="日记日期" className="w-40" disabled={transitionBusy} value={selected.date || ""} onChange={(event) => patch({ date: event.target.value })} />
                 <span className="text-muted-foreground">{weekdayText(selected.date)}</span>
                 <span className="text-muted-foreground">字数: {wordCount}</span>
               </div>
@@ -390,6 +461,7 @@ export function Diary() {
                 placeholder="开始写日记..."
                 className="min-h-[420px] border-0 resize-none text-base leading-relaxed focus-visible:ring-0"
                 value={selected.body || ""}
+                disabled={transitionBusy}
                 onChange={(event) => patch({ body: event.target.value })}
               />
             </div>
@@ -426,6 +498,23 @@ export function Diary() {
           <div className="flex-1 grid place-content-center text-muted-foreground">选择一篇日记开始编辑</div>
         )}
       </div>
+      <div className="fixed bottom-0 right-0 max-w-[calc(100%-1rem)] rounded-tl-md border bg-background px-4 py-1.5 text-xs text-muted-foreground" role="status" aria-live="polite">
+        {saving ? "正在保存…" : dirty ? `未保存 · ${message}` : message}
+      </div>
+      <Dialog open={transitionOpen} onOpenChange={(open) => { if (!open) cancelTransition(); }}>
+        <DialogContent onEscapeKeyDown={(event) => { if (transitionBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (transitionBusy) event.preventDefault(); }}>
+          <DialogHeader>
+            <DialogTitle>保存当前日记？</DialogTitle>
+            <DialogDescription>当前日记有尚未保存的修改。选择保存后继续、放弃修改，或返回继续写作。</DialogDescription>
+          </DialogHeader>
+          {transitionError && <p role="alert" className="text-sm text-destructive">{transitionError}</p>}
+          <DialogFooter>
+            <Button variant="outline" disabled={transitionBusy} onClick={cancelTransition}>取消切换</Button>
+            <Button variant="outline" disabled={transitionBusy} onClick={() => completeTransition(false)}>放弃修改并继续</Button>
+            <Button disabled={transitionBusy} onClick={() => completeTransition(true)}>{transitionBusy ? "处理中…" : "保存并继续"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

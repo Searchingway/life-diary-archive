@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router";
+import { createBrowserRouter, createRoutesFromElements, RouterProvider, Route, Navigate } from "react-router";
 import { MainLayout } from "./components/layouts/MainLayout";
 import { Dashboard } from "./pages/Dashboard";
 import { Diary } from "./pages/Diary";
@@ -16,10 +16,7 @@ import { WorksReflection } from "./pages/WorksReflection";
 import { DataManagement } from "./pages/DataManagement";
 import { AISettings } from "./pages/AISettings";
 
-export default function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
+const router = createBrowserRouter(createRoutesFromElements(
         <Route path="/" element={<MainLayout />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
@@ -38,7 +35,8 @@ export default function App() {
           <Route path="data-management" element={<DataManagement />} />
           <Route path="ai-settings" element={<AISettings />} />
         </Route>
-      </Routes>
-    </BrowserRouter>
-  );
+));
+
+export default function App() {
+  return <RouterProvider router={router} />;
 }

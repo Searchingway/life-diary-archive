@@ -12,6 +12,21 @@ function deferred<T>() {
 }
 
 describe("SaveCoordinator", () => {
+  it("waits for queued saves, including failures, before allowing a discard transition", async () => {
+    const coordinator = new SaveCoordinator();
+    const pending = deferred<void>();
+    const save = coordinator.enqueue(async () => { await pending.promise; throw new Error("failed"); });
+    const handledSave = save.catch(() => undefined);
+    let finished = false;
+    const idle = coordinator.waitForIdle().then(() => { finished = true; });
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    pending.resolve();
+    await Promise.all([handledSave, idle]);
+    expect(finished).toBe(true);
+    expect(coordinator.hasPendingSaves).toBe(false);
+  });
+
   it("runs save requests strictly in enqueue order", async () => {
     const coordinator = new SaveCoordinator();
     const first = deferred<void>();

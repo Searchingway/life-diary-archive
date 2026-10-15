@@ -21,6 +21,10 @@ export class SaveCoordinator {
   get hasPendingSaves() {
     return this.pending > 0;
   }
+
+  async waitForIdle(): Promise<void> {
+    await this.tail;
+  }
 }
 
 export function shouldApplySaveResult(
