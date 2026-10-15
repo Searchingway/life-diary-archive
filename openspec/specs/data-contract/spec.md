@@ -80,6 +80,13 @@ interface SavePayload {
 - 连接测试不是 AI 内容应用流程，不改变日记、计划或其他记录。
 - AI 路由只接受当前本机端口的 127.0.0.1/localhost Host；带 Origin 时须与当前 HTTP origin 一致。POST 强制 application/json；异常来源/Host 返回 HTTP 403，非 JSON 返回 HTTP 415。无 Origin 的原生 JSON 客户端仍可使用。
 
+### 总览统计约束
+
+- 今日待办日期与行动计划 Today 视图兼容：优先 `scheduledDate`，其次旧 `date`，最后 `startDate`；已完成任务不计入。
+- 进行中计划按明确的进行状态计算，暂停、未开始等状态不计为进行中；无状态的历史计划保留未完成判定。
+- 完成状态按完整值匹配，`未完成` 不得因包含 `完成` 而计入已完成。
+- 前端默认日期使用本地日历日期；甘特日列跨夏令时仍保持连续，不用 UTC 转换生成日期输入值。
+
 | 约束 | 说明 |
 |------|------|
 | 软删除 | 所有模块使用 `deleted: true` + `deleted_at` |

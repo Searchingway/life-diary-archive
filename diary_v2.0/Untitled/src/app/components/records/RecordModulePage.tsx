@@ -1,4 +1,5 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { calendarDate } from "../../lib/calendarDate";
 import { LucideIcon, Plus, Save, Search, Trash2, Download, Image as ImageIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -30,7 +31,7 @@ interface RecordModulePageProps {
 }
 
 function createDraft(moduleKey: ModuleKey, title: string): RecordItem {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = calendarDate();
   return {
     id: "",
     title: "",

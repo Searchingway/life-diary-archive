@@ -1,4 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
+import { calendarDate } from "../lib/calendarDate";
 import { Download, Eye, FileText, Plus, Save, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -12,7 +13,7 @@ function draftNote(): RecordItem {
     title: "",
     subtitle: "信息备忘",
     body: "",
-    date: new Date().toISOString().slice(0, 10),
+    date: calendarDate(),
     updated_at: "",
     type: "Markdown",
     status: "草稿",

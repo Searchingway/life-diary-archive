@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { calendarDate } from "../lib/calendarDate";
 import { Calendar, Download, MapPin, Plus, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -67,7 +68,7 @@ export function Footprints() {
 
   async function addVisit() {
     if (!selected?.id) return;
-    const saved = await saveFootprintVisit(selected.id, { date: new Date().toISOString().slice(0, 10) });
+    const saved = await saveFootprintVisit(selected.id, { date: calendarDate() });
     setSelected(saved);
     setPlaces((items) => items.map((item) => (item.id === saved.id ? saved : item)));
   }

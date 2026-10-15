@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBlocker } from "react-router";
+import { calendarDate } from "../lib/calendarDate";
 import { Download, Plus, Save, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -20,7 +21,7 @@ import {
 import { SaveCoordinator, shouldApplySaveResult, shouldPersistDiary } from "../lib/saveCoordinator";
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return calendarDate();
 }
 
 function newDiary(): RecordItem {

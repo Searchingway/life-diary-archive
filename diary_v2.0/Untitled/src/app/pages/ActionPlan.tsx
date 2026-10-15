@@ -1,4 +1,5 @@
 import { useEffect, useReducer } from "react";
+import { calendarDate, calendarDays } from "../lib/calendarDate";
 import { Calendar, CheckCircle, GanttChart, List, Network, Plus, Search, Trash2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
@@ -114,7 +115,7 @@ export function ActionPlan() {
   const progress = planProgress(tasks);
   const grouped = groupTasksByDate(tasks);
   const sortedDates = sortDateKeys(grouped);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = calendarDate();
 
   // Load
   async function load(keyword = state.query) {
@@ -445,13 +446,7 @@ function GanttView({ tasks, today }: { tasks: ActionPlanTaskV2[]; today: string 
   const maxDate = allDates[allDates.length - 1];
 
   // Generate day columns
-  const dayColumns: string[] = [];
-  const cursor = new Date(minDate);
-  const end = new Date(maxDate);
-  while (cursor <= end) {
-    dayColumns.push(cursor.toISOString().slice(0, 10));
-    cursor.setDate(cursor.getDate() + 1);
-  }
+  const dayColumns = calendarDays(minDate, maxDate);
 
   const colWidth = 36; // px per day column
 

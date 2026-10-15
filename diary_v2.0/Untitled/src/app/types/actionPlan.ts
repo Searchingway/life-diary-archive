@@ -1,3 +1,5 @@
+import { calendarDate } from "../lib/calendarDate";
+
 /** V2 task model supporting Today / Gantt / Chain three views. */
 export interface ActionPlanTaskV2 {
   id: string;
@@ -34,6 +36,7 @@ export interface LegacyTask {
   date?: string;
   time?: string;
   estimated_minutes?: number;
+  estimatedMinutes?: number;
   done?: boolean;
   note?: string;
   startDate?: string;
@@ -58,18 +61,18 @@ export function toActionPlanTaskV2(raw: LegacyTask): ActionPlanTaskV2 {
     scheduledDate: raw.scheduledDate || date || undefined,
     startDate,
     endDate: endDate,
-    progress: raw.progress ?? (done ? 100 : 0),
+    progress: done ? 100 : Number.isFinite(raw.progress) ? Math.max(0, Math.min(100, raw.progress!)) : 0,
     dependsOn: Array.isArray(raw.dependsOn) ? raw.dependsOn : [],
     chainX: raw.chainX ?? null,
     chainY: raw.chainY ?? null,
-    estimatedMinutes: raw.estimated_minutes || raw.estimatedMinutes === 0 ? raw.estimated_minutes : 0,
+    estimatedMinutes: raw.estimatedMinutes ?? raw.estimated_minutes ?? 0,
     done,
-    status: (raw.status as ActionPlanTaskV2["status"]) || (done ? "done" : "todo"),
+    status: done ? "done" : (raw.status as ActionPlanTaskV2["status"]) || "todo",
     note: raw.note || "",
   };
 }
 
-export function createEmptyTask(date = new Date().toISOString().slice(0, 10)): ActionPlanTaskV2 {
+export function createEmptyTask(date = calendarDate()): ActionPlanTaskV2 {
   return {
     id: crypto.randomUUID(),
     title: "新子任务",

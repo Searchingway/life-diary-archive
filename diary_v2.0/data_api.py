@@ -411,7 +411,7 @@ def build_dashboard_stats() -> dict[str, int]:
         status = str(record.get("status") or "")
         extra = record.get("extra") if isinstance(record.get("extra"), dict) else {}
         tasks = extra.get("tasks") if isinstance(extra, dict) else []
-        if "完成" in status or status.lower() in {"completed", "done"}:
+        if status.strip().lower() in {"已完成", "完成", "completed", "done"}:
             return True
         if isinstance(tasks, list) and tasks:
             return all(isinstance(task, dict) and task.get("done") for task in tasks)
@@ -419,7 +419,7 @@ def build_dashboard_stats() -> dict[str, int]:
 
     def active(record: dict[str, Any]) -> bool:
         status = str(record.get("status") or "")
-        return ("进行" in status) or status.lower() in {"active", "in_progress"} or not completed(record)
+        return status.strip().lower() in {"进行中", "进行", "active", "in_progress", "doing"} or (not status.strip() and not completed(record))
 
     def updated_in(record: dict[str, Any], prefix: str) -> bool:
         value = str(record.get("updated_at") or record.get("date") or "")
@@ -433,7 +433,9 @@ def build_dashboard_stats() -> dict[str, int]:
         if isinstance(tasks, list):
             today_pending += sum(
                 1 for task in tasks
-                if isinstance(task, dict) and str(task.get("date") or "") == today_str and not bool(task.get("done"))
+                if isinstance(task, dict)
+                and str(task.get("scheduledDate") or task.get("date") or task.get("startDate") or "") == today_str
+                and not bool(task.get("done"))
             )
     return {
         "month_diary_count": len(month_entries),

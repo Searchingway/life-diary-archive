@@ -155,3 +155,30 @@
 
 ### 是否建议 commit
 是：`feat(ai): connect desktop settings and non-persisting connection tests`。
+
+
+## 2026-10-15 本地日期、行动任务与总览统计回归
+
+### 修改文件
+- `diary_v2.0/Untitled/src/app/lib/calendarDate.ts`、`calendarDate.test.ts` — 日期输入采用本地年月日；日期范围按纯日期序列生成，覆盖纽约和圣地亚哥的夏令时边界及跨年。
+- `diary_v2.0/Untitled/src/app/types/actionPlan.ts`、`actionPlan.test.ts` — 保留新旧耗时字段和 0 值；完成任务强制 100% 进度，进度限制在 0–100，甘特条宽仍仅由日期决定。
+- `diary_v2.0/Untitled/src/app/pages/Diary.tsx`、`LightPlan.tsx`、`InfoMemo.tsx`、`OrderMemo.tsx`、`Footprints.tsx`、`ActionPlan.tsx`、`components/records/RecordModulePage.tsx` — 消除本地凌晨默认日期回退一天的问题，甘特日期轴使用连续日列。
+- `diary_v2.0/data_api.py`、`tests/test_diary_v2_backend_safety.py` — 今日待办读取 V2 scheduledDate 并兼容旧 date/startDate；暂停/未开始不算进行中，未完成不误判已完成。
+- `openspec/specs/data-contract/spec.md` — 补充现有总览字段的统计口径。
+- `.github/workflows/ci.yml` — 云端前端检查增加 Vitest 回归；本地执行与云端执行分别记录。
+
+### 测试结果
+- 新增任务用例先复现 4 failed；统计先复现 2 failed；修复后通过。
+- 独立复查发现圣地亚哥午夜夏令时遗漏末日，先复现再修复；纽约/圣地亚哥日历专项通过。
+- 最终完整 Python：164 passed，21 subtests passed。
+- 最终前端 Vitest：3 files / 17 passed；`npm run build`：通过。
+- 浏览器在 Asia/Shanghai 00:30 新建日记，日期正确为 2026-10-15。
+- 此前批次的草稿保护、工作台错误恢复/窄屏、真实 SDK 到本地模拟供应商流程均已实际验证；未使用真实用户数据。
+
+### 风险
+- 日期与任务修复沿用既有字段和三视图，不迁移历史 JSON。
+- 未完成 Windows 桌面壳、安卓真机和付费供应商验收；GitHub Actions 以实际运行结果为准，不以本地成功代替。
+- 原工作区的启动器、移动端及既有文档改动保持原样，本轮提交仅包含明确选择的文件/新增文档段落。
+
+### 是否建议 commit
+是：`fix(plans): use local dates and correct task and dashboard statistics`。

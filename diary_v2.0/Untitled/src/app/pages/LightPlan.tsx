@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
+import { calendarDate } from "../lib/calendarDate";
 import { ArrowRight, CheckCircle, Download, Plus, Search, Sparkles, Target } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
@@ -8,7 +9,7 @@ import { Textarea } from "../components/ui/textarea";
 import { RecordItem, exportModuleTxt, listRecords, promoteLightPlan, saveRecord } from "../lib/api";
 
 function draftPlan(): RecordItem {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = calendarDate();
   return {
     id: "",
     title: "",

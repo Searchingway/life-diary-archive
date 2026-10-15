@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -53,6 +54,27 @@ class DiaryV2BackendSafetyTests(unittest.TestCase):
         original = data_api.save_resource({"title": "机会", "extra": {"notes": "保留备注"}})
         saved = data_api.save_resource({"id": original["id"], "title": "更新标题"})
         self.assertEqual(saved["extra"]["notes"], "保留备注")
+
+    def test_dashboard_today_tasks_support_v2_and_legacy_dates(self) -> None:
+        today = date.today().isoformat()
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        data_api.save_generic_record("action_plans", {
+            "title": "日程", "status": "进行中", "extra": {"tasks": [
+                {"id": "v2", "scheduledDate": today, "done": False},
+                {"id": "legacy", "date": today, "done": False},
+                {"id": "fallback", "startDate": today, "done": False},
+                {"id": "future", "scheduledDate": tomorrow, "date": today, "done": False},
+                {"id": "done", "scheduledDate": today, "done": True},
+            ]},
+        })
+        self.assertEqual(data_api.build_dashboard_stats()["today_pending_tasks"], 3)
+
+    def test_dashboard_does_not_count_paused_or_unstarted_plans_as_active(self) -> None:
+        for status in ("进行中", "暂停", "未开始", "已完成", "未完成"):
+            data_api.save_generic_record("action_plans", {"title": status, "status": status})
+        stats = data_api.build_dashboard_stats()
+        self.assertEqual(stats["active_action_plan_count"], 1)
+        self.assertEqual(stats["month_completed_plans"], 1)
 
     def test_unique_output_path_does_not_overwrite_existing_file(self) -> None:
         target = self.root / "export.docx"

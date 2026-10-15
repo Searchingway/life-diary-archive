@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { calendarDate } from "../lib/calendarDate";
 import { Download, FileText, Plus, Search } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -45,7 +46,7 @@ function draftMemo(): RecordItem {
     title: "",
     subtitle: "接单备忘",
     body: "",
-    date: new Date().toISOString().slice(0, 10),
+    date: calendarDate(),
     updated_at: "",
     type: "接单记录",
     status: "在报价",
